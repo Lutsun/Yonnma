@@ -32,6 +32,12 @@
           "resizeMode": "contain",
           "backgroundColor": "#1DB954"
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Yonnma utilise ta position pour te montrer les arrêts de bus autour de toi."
+        }
       ]
     ],
     "scheme": "yonnma"
