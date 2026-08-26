@@ -21,3 +21,11 @@ export type Stop = {
   distance_meters?: number;
   lines?: string[];
 };
+
+export type Trip = {
+  id: string;
+  originLabel: string;
+  destinationLabel: string;
+  isSaved: boolean;
+  createdAt: string;
+};

@@ -12,6 +12,7 @@ export const Colors = {
   yonnTint: '#E5FBED', // vert très pâle — fonds de puces, focus
 
   ma: '#201E1D', // texte d'ancrage
+  gold: '#F2B705', // étoile favori uniquement
 
   // Neutres
   cream: '#FFFFFF', // fond des écrans

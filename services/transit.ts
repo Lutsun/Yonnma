@@ -13,20 +13,21 @@ export async function getLines(): Promise<Line[]> {
   return data;
 }
 
+// Arrêts d'une ligne, dans l'ordre, via la fonction PostGIS
+// `get_line_stops` définie dans supabase/schema.sql.
 export async function getLineStops(lineId: string): Promise<Stop[]> {
-  const { data, error } = await supabase
-    .from('line_stops')
-    .select('sequence, stops(id, name, location)')
-    .eq('line_id', lineId)
-    .order('sequence');
+  const { data, error } = await supabase.rpc('get_line_stops', { p_line_id: lineId });
   if (error) throw error;
+  return data;
+}
 
-  return (data ?? []).map((row: any) => ({
-    id: row.stops.id,
-    name: row.stops.name,
-    latitude: row.stops.location.coordinates[1],
-    longitude: row.stops.location.coordinates[0],
-  }));
+// Recherche d'arrêts par nom, via la fonction PostGIS `search_stops`
+// définie dans supabase/schema.sql.
+export async function searchStops(query: string): Promise<Stop[]> {
+  if (!query.trim()) return [];
+  const { data, error } = await supabase.rpc('search_stops', { query: query.trim() });
+  if (error) throw error;
+  return data;
 }
 
 // Arrêts les plus proches d'un point (position de l'utilisateur), via la

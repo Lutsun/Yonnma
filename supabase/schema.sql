@@ -3,13 +3,14 @@
 -- À exécuter dans l'éditeur SQL de ton projet Supabase (Project > SQL Editor
 -- > New query), ou via `supabase db push` si tu utilises la CLI plus tard.
 --
--- Architecture volontairement simple : 6 tables.
---   operators   -> les réseaux de transport (Tata AFTU, Dakar Dem Dikk, ...)
---   lines       -> les lignes de bus (ex: "Ligne 40", "B1")
---   stops       -> les arrêts, avec leur position GPS (PostGIS)
---   line_stops  -> l'ordre des arrêts sur chaque ligne
---   users       -> les comptes Yonnma (téléphone + nom, pas de mot de passe)
---   user_trips  -> les trajets recherchés / enregistrés par un utilisateur
+-- Architecture volontairement simple : 7 tables.
+--   operators       -> les réseaux de transport (Tata AFTU, Dakar Dem Dikk, ...)
+--   lines           -> les lignes de bus (ex: "Ligne 40", "B1")
+--   stops           -> les arrêts, avec leur position GPS (PostGIS)
+--   line_stops      -> l'ordre des arrêts sur chaque ligne
+--   users           -> les comptes Yonnma (téléphone + nom, pas de mot de passe)
+--   user_trips      -> les trajets recherchés / enregistrés par un utilisateur
+--   favorite_lines  -> les lignes de bus mises en favori par un utilisateur
 
 -- 1. PostGIS gère tout ce qui est géographique : distances, "arrêt le plus
 --    proche", tracés de ligne. Supabase l'a déjà intégré, on l'active juste.
@@ -109,6 +110,54 @@ as $$
   order by distance_meters asc;
 $$;
 
+-- Fonction : arrêts d'une ligne, dans l'ordre, avec leurs coordonnées
+-- (utilisée par l'écran de détail d'une ligne).
+create or replace function get_line_stops(p_line_id uuid)
+returns table (
+  id uuid,
+  name text,
+  latitude double precision,
+  longitude double precision,
+  sequence int
+)
+language sql
+stable
+as $$
+  select
+    s.id,
+    s.name,
+    st_y(s.location::geometry) as latitude,
+    st_x(s.location::geometry) as longitude,
+    ls.sequence
+  from line_stops ls
+  join stops s on s.id = ls.stop_id
+  where ls.line_id = p_line_id
+  order by ls.sequence;
+$$;
+
+-- Fonction : recherche d'arrêts par nom (utilisée par la barre "Où
+-- voulez-vous aller ?" de l'écran d'accueil).
+create or replace function search_stops(query text)
+returns table (
+  id uuid,
+  name text,
+  latitude double precision,
+  longitude double precision
+)
+language sql
+stable
+as $$
+  select
+    s.id,
+    s.name,
+    st_y(s.location::geometry) as latitude,
+    st_x(s.location::geometry) as longitude
+  from stops s
+  where s.name ilike '%' || query || '%'
+  order by s.name
+  limit 8;
+$$;
+
 -- 6. Utilisateurs -------------------------------------------------------
 -- Connexion par téléphone + code SMS uniquement (voir services/auth.ts) —
 -- pas de mot de passe, pas d'e-mail requis.
@@ -134,7 +183,43 @@ create table if not exists user_trips (
 
 create index if not exists user_trips_user_id_idx on user_trips (user_id);
 
--- 8. Sécurité (Row Level Security) ---------------------------------------
+-- Fonction : enregistrer un trajet en favori (utilisée par le bouton
+-- "Enregistrer" quand on choisit une destination sur l'écran d'accueil).
+create or replace function save_trip(
+  p_user_id uuid,
+  p_origin_label text,
+  p_origin_lat double precision,
+  p_origin_lng double precision,
+  p_destination_label text,
+  p_destination_lat double precision,
+  p_destination_lng double precision
+)
+returns uuid
+language sql
+as $$
+  insert into user_trips (
+    user_id, origin_label, origin_location,
+    destination_label, destination_location, is_saved
+  ) values (
+    p_user_id,
+    p_origin_label,
+    st_setsrid(st_point(p_origin_lng, p_origin_lat), 4326)::geography,
+    p_destination_label,
+    st_setsrid(st_point(p_destination_lng, p_destination_lat), 4326)::geography,
+    true
+  )
+  returning id;
+$$;
+
+-- 8. Lignes favorites ----------------------------------------------------
+create table if not exists favorite_lines (
+  user_id uuid not null references users (id) on delete cascade,
+  line_id uuid not null references lines (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, line_id)
+);
+
+-- 9. Sécurité (Row Level Security) ---------------------------------------
 -- Les données de transport (lignes, arrêts) sont publiques en lecture.
 -- Les données utilisateur sont privées.
 alter table operators enable row level security;
@@ -143,6 +228,7 @@ alter table stops enable row level security;
 alter table line_stops enable row level security;
 alter table users enable row level security;
 alter table user_trips enable row level security;
+alter table favorite_lines enable row level security;
 
 create policy "Lecture publique des opérateurs" on operators for select using (true);
 create policy "Lecture publique des lignes" on lines for select using (true);
@@ -160,3 +246,7 @@ create policy "Mise à jour de compte (temporaire)" on users for update using (t
 create policy "Lecture des trajets (temporaire)" on user_trips for select using (true);
 create policy "Création de trajet (temporaire)" on user_trips for insert with check (true);
 create policy "Suppression de trajet (temporaire)" on user_trips for delete using (true);
+
+create policy "Lecture des lignes favorites (temporaire)" on favorite_lines for select using (true);
+create policy "Ajout d'une ligne favorite (temporaire)" on favorite_lines for insert with check (true);
+create policy "Retrait d'une ligne favorite (temporaire)" on favorite_lines for delete using (true);
