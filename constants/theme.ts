@@ -53,3 +53,9 @@ export const Radii = {
   xl: 28,
   pill: 999,
 };
+
+// Hauteur de la barre de navigation flottante (voir app/(tabs)/_layout.tsx)
+// + son décalage par rapport au bas de l'écran. Les écrans l'utilisent pour
+// laisser assez de place en bas de leur contenu.
+export const TAB_BAR_HEIGHT = 76;
+export const TAB_BAR_BOTTOM_MARGIN = Spacing.sm;
