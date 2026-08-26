@@ -7,17 +7,28 @@ import {
   StyleSheet,
   ActivityIndicator,
   Platform,
+  Keyboard,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import MapView, { Marker, Callout, Region } from 'react-native-maps';
+import MapView, { Marker, Callout, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '../../store/AuthContext';
-import { Colors, Fonts, Radii, Spacing } from '../../constants/theme';
-import { getNearbyStops } from '../../services/transit';
+import {
+  Colors,
+  Fonts,
+  Radii,
+  Spacing,
+  TAB_BAR_HEIGHT,
+  TAB_BAR_BOTTOM_MARGIN,
+} from '../../constants/theme';
+import { getNearbyStops, searchStops } from '../../services/transit';
+import { saveTrip } from '../../services/trips';
 import { Stop } from '../../types/transit';
+import { initialsOf } from '../../utils/text';
+import { distanceKm, estimateTripMinutes, formatDistance } from '../../utils/eta';
 
 const DAKAR_REGION: Region = {
   latitude: 14.6928,
@@ -26,8 +37,9 @@ const DAKAR_REGION: Region = {
   longitudeDelta: 0.045,
 };
 
+const SEARCH_DEBOUNCE_MS = 300;
+
 export default function HomeScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const mapRef = useRef<MapView>(null);
@@ -35,9 +47,15 @@ export default function HomeScreen() {
   const [region, setRegion] = useState<Region>(DAKAR_REGION);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [locationDenied, setLocationDenied] = useState(false);
-  const [destination, setDestination] = useState('');
+  const [reducedAccuracy, setReducedAccuracy] = useState(false);
   const [stops, setStops] = useState<Stop[]>([]);
   const [stopsError, setStopsError] = useState(false);
+
+  const [destination, setDestination] = useState('');
+  const [searchResults, setSearchResults] = useState<Stop[]>([]);
+  const [selectedDestination, setSelectedDestination] = useState<Stop | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const loadNearbyStops = async (latitude: number, longitude: number) => {
     try {
@@ -52,14 +70,19 @@ export default function HomeScreen() {
   const locateMe = async () => {
     setLoadingLocation(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
         setLocationDenied(true);
         await loadNearbyStops(DAKAR_REGION.latitude, DAKAR_REGION.longitude);
         return;
       }
       setLocationDenied(false);
-      const position = await Location.getCurrentPositionAsync({});
+      // Sur iOS, l'utilisateur peut n'autoriser qu'une position approximative
+      // (~ plusieurs km) — c'est souvent la cause d'un point mal placé.
+      setReducedAccuracy(permission.ios?.accuracy === 'reduced');
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.BestForNavigation,
+      });
       const next: Region = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
@@ -76,13 +99,93 @@ export default function HomeScreen() {
 
   useEffect(() => {
     locateMe();
+
+    // Suit la position réelle en continu (pas juste un relevé ponctuel),
+    // pour que le point bleu et l'origine des trajets restent exacts.
+    let subscription: Location.LocationSubscription | undefined;
+    Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 15 },
+      (position) => {
+        setRegion((prev) => ({
+          ...prev,
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        }));
+      }
+    ).then((sub) => {
+      subscription = sub;
+    });
+
+    return () => subscription?.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const firstName = user?.fullName?.trim().split(/\s+/)[0];
+  // Recherche d'arrêts au fil de la frappe (avec un petit délai pour ne pas
+  // interroger la base à chaque lettre tapée).
+  useEffect(() => {
+    if (selectedDestination || !destination.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      searchStops(destination)
+        .then(setSearchResults)
+        .catch(() => setSearchResults([]));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [destination, selectedDestination]);
 
-  const handleSearch = () => {
-    router.push('/routes');
+  const firstName = user?.fullName?.trim().split(/\s+/)[0];
+  const initials = user ? initialsOf(user.fullName) : '';
+
+  const tripEstimate = selectedDestination
+    ? distanceKm(region.latitude, region.longitude, selectedDestination.latitude, selectedDestination.longitude)
+    : null;
+
+  const handleSelectResult = (stop: Stop) => {
+    setSelectedDestination(stop);
+    setDestination(stop.name);
+    setSearchResults([]);
+    setSaved(false);
+    Keyboard.dismiss();
+    // Cadre la carte pour montrer à la fois ta position et l'arrêt choisi,
+    // avec le trajet vert entre les deux (comme sur Yango).
+    mapRef.current?.fitToCoordinates(
+      [
+        { latitude: region.latitude, longitude: region.longitude },
+        { latitude: stop.latitude, longitude: stop.longitude },
+      ],
+      {
+        edgePadding: { top: 120, right: 80, bottom: 280, left: 80 },
+        animated: true,
+      }
+    );
+  };
+
+  const handleClearDestination = () => {
+    setDestination('');
+    setSelectedDestination(null);
+    setSearchResults([]);
+    setSaved(false);
+  };
+
+  const handleSaveTrip = async () => {
+    if (!user || !selectedDestination) return;
+    setSaving(true);
+    try {
+      await saveTrip({
+        userId: user.id,
+        originLabel: 'Ma position actuelle',
+        originLatitude: region.latitude,
+        originLongitude: region.longitude,
+        destinationLabel: selectedDestination.name,
+        destinationLatitude: selectedDestination.latitude,
+        destinationLongitude: selectedDestination.longitude,
+      });
+      setSaved(true);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -116,6 +219,23 @@ export default function HomeScreen() {
             </Callout>
           </Marker>
         ))}
+
+        {selectedDestination && (
+          <>
+            <Polyline
+              coordinates={[
+                { latitude: region.latitude, longitude: region.longitude },
+                { latitude: selectedDestination.latitude, longitude: selectedDestination.longitude },
+              ]}
+              strokeColor={Colors.yonn}
+              strokeWidth={4}
+              lineDashPattern={[1]}
+            />
+            <Marker coordinate={selectedDestination} anchor={{ x: 0.5, y: 1 }}>
+              <Ionicons name="location" size={36} color={Colors.danger} />
+            </Marker>
+          </>
+        )}
       </MapView>
 
       {loadingLocation && (
@@ -125,18 +245,35 @@ export default function HomeScreen() {
       )}
 
       <View style={[styles.topBar, { paddingTop: insets.top + Spacing.sm }]}>
-        <Text style={styles.greeting}>
-          Bonjour{firstName ? ` ${firstName}` : ''} 👋
-        </Text>
-        <Text style={styles.subGreeting}>Où veux-tu aller aujourd'hui ?</Text>
+        <View style={styles.greetingCard}>
+          <View style={styles.greetingAvatar}>
+            <Text style={styles.greetingAvatarText}>{initials}</Text>
+          </View>
+          <View>
+            <Text style={styles.greeting}>
+              Bonjour{firstName ? ` ${firstName}` : ''} 👋
+            </Text>
+            <Text style={styles.subGreeting}>Où veux-tu aller aujourd'hui ?</Text>
+          </View>
+        </View>
 
         {locationDenied && (
-          <View style={styles.notice}>
+          <TouchableOpacity style={styles.notice} onPress={() => Linking.openSettings()}>
             <Ionicons name="information-circle" size={18} color={Colors.yonn} />
             <Text style={styles.noticeText}>
-              Active ta position pour voir les arrêts autour de toi.
+              Active ta position dans Réglages pour voir les arrêts autour de toi.
             </Text>
-          </View>
+          </TouchableOpacity>
+        )}
+
+        {reducedAccuracy && (
+          <TouchableOpacity style={styles.notice} onPress={() => Linking.openSettings()}>
+            <Ionicons name="locate" size={18} color={Colors.yonn} />
+            <Text style={styles.noticeText}>
+              Position approximative activée — appuie ici pour activer la position précise dans
+              Réglages et voir ton point exact.
+            </Text>
+          </TouchableOpacity>
         )}
 
         {stopsError && (
@@ -149,7 +286,12 @@ export default function HomeScreen() {
         )}
       </View>
 
-      <View style={[styles.locateButtonWrap, { bottom: Spacing.xl + 96 }]}>
+      <View
+        style={[
+          styles.locateButtonWrap,
+          { bottom: insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.xl + 96 },
+        ]}
+      >
         <TouchableOpacity
           style={styles.locateButton}
           onPress={locateMe}
@@ -160,7 +302,13 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.bottomCard, { paddingBottom: insets.bottom + Spacing.md }]}>
+      <View
+        style={[
+          styles.bottomCard,
+          { bottom: insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.sm },
+        ]}
+      >
+        <View style={styles.handle} />
         <View style={styles.searchRow}>
           <Ionicons name="search" size={20} color={Colors.stone} />
           <TextInput
@@ -168,19 +316,122 @@ export default function HomeScreen() {
             placeholder="Où voulez-vous aller ?"
             placeholderTextColor={Colors.stone}
             value={destination}
-            onChangeText={setDestination}
+            onChangeText={(t) => {
+              setDestination(t);
+              if (selectedDestination) setSelectedDestination(null);
+            }}
             returnKeyType="search"
-            onSubmitEditing={handleSearch}
           />
-          <TouchableOpacity
-            style={styles.searchButton}
-            onPress={handleSearch}
-            accessibilityRole="button"
-            accessibilityLabel="Rechercher un trajet"
-          >
-            <Ionicons name="arrow-forward" size={18} color={Colors.white} />
-          </TouchableOpacity>
+          {destination.length > 0 && (
+            <TouchableOpacity
+              onPress={handleClearDestination}
+              accessibilityRole="button"
+              accessibilityLabel="Effacer la recherche"
+            >
+              <Ionicons name="close-circle" size={20} color={Colors.stone} />
+            </TouchableOpacity>
+          )}
         </View>
+
+        {searchResults.length > 0 && (
+          <View style={styles.resultsList}>
+            {searchResults.map((stop) => (
+              <TouchableOpacity
+                key={stop.id}
+                style={styles.resultRow}
+                activeOpacity={0.6}
+                onPress={() => handleSelectResult(stop)}
+              >
+                <View style={styles.resultIcon}>
+                  <Ionicons name="bus" size={16} color={Colors.yonn} />
+                </View>
+                <Text style={styles.resultText}>{stop.name}</Text>
+                <Ionicons name="chevron-forward" size={16} color={Colors.stoneLight} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {!selectedDestination && !destination.trim() && stops.length > 0 && (
+          <View style={styles.resultsList}>
+            <Text style={styles.suggestionsTitle}>Arrêts à proximité</Text>
+            {stops.slice(0, 4).map((stop) => (
+              <TouchableOpacity
+                key={stop.id}
+                style={styles.resultRow}
+                activeOpacity={0.6}
+                onPress={() => handleSelectResult(stop)}
+              >
+                <View style={styles.resultIcon}>
+                  <Ionicons name="bus" size={16} color={Colors.yonn} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.resultText}>{stop.name}</Text>
+                  {!!stop.lines?.length && (
+                    <Text style={styles.resultSubtext} numberOfLines={1}>
+                      {stop.lines.join(' · ')}
+                    </Text>
+                  )}
+                </View>
+                {typeof stop.distance_meters === 'number' && (
+                  <Text style={styles.resultDistance}>
+                    {formatDistance(stop.distance_meters / 1000)}
+                  </Text>
+                )}
+                <Ionicons name="chevron-forward" size={16} color={Colors.stoneLight} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {selectedDestination && tripEstimate !== null && (
+          <View style={styles.confirmCard}>
+            <View style={styles.confirmHeader}>
+              <View style={styles.confirmIcon}>
+                <Ionicons name="navigate" size={16} color={Colors.yonn} />
+              </View>
+              <Text style={styles.confirmText} numberOfLines={1}>
+                Trajet vers <Text style={styles.confirmDestination}>{selectedDestination.name}</Text>
+              </Text>
+            </View>
+
+            <View style={styles.confirmMetaRow}>
+              <View style={styles.confirmMeta}>
+                <Ionicons name="time-outline" size={14} color={Colors.stone} />
+                <Text style={styles.confirmMetaText}>
+                  ~{estimateTripMinutes(tripEstimate)} min (estimation)
+                </Text>
+              </View>
+              <View style={styles.confirmMeta}>
+                <Ionicons name="navigate-outline" size={14} color={Colors.stone} />
+                <Text style={styles.confirmMetaText}>{formatDistance(tripEstimate)}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.saveButton, saved && styles.saveButtonDone]}
+              onPress={handleSaveTrip}
+              disabled={saving || saved}
+              accessibilityRole="button"
+              accessibilityLabel="Enregistrer ce trajet"
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color={Colors.white} />
+              ) : (
+                <>
+                  <Ionicons
+                    name={saved ? 'checkmark' : 'bookmark'}
+                    size={16}
+                    color={Colors.white}
+                  />
+                  <Text style={styles.saveButtonText}>
+                    {saved ? 'Enregistré' : 'Enregistrer ce trajet'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </View>
   );
@@ -201,14 +452,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
+  greetingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.white,
+    borderRadius: Radii.pill,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    paddingRight: Spacing.lg,
+    shadowColor: Colors.ma,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  greetingAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.yonnTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  greetingAvatarText: {
+    fontFamily: Fonts.bodySemi,
+    fontSize: 14,
+    color: Colors.yonn,
+  },
   greeting: {
     fontFamily: Fonts.display,
-    fontSize: 22,
+    fontSize: 18,
     color: Colors.ma,
   },
   subGreeting: {
     fontFamily: Fonts.body,
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.stone,
     marginTop: 2,
   },
@@ -221,6 +501,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     marginTop: Spacing.sm,
+    shadowColor: Colors.ma,
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
   },
   noticeText: {
     flex: 1,
@@ -237,6 +522,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: Colors.white,
+    shadowColor: Colors.ma,
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   callout: {
     minWidth: 140,
@@ -272,19 +562,26 @@ const styles = StyleSheet.create({
   },
   bottomCard: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
+    left: Spacing.lg,
+    right: Spacing.lg,
     backgroundColor: Colors.white,
-    borderTopLeftRadius: Radii.xl,
-    borderTopRightRadius: Radii.xl,
+    borderRadius: Radii.xl,
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.md,
     shadowColor: Colors.ma,
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.12,
     shadowRadius: 16,
-    shadowOffset: { width: 0, height: -4 },
-    elevation: Platform.OS === 'android' ? 8 : 0,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: Platform.OS === 'android' ? 8 : 6,
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.stoneLight,
+    marginBottom: Spacing.sm,
   },
   searchRow: {
     flexDirection: 'row',
@@ -301,12 +598,112 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.ma,
   },
-  searchButton: {
-    width: 34,
-    height: 34,
+  resultsList: {
+    marginTop: Spacing.sm,
+  },
+  suggestionsTitle: {
+    fontFamily: Fonts.bodySemi,
+    fontSize: 12,
+    color: Colors.stone,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: Spacing.xs,
+    paddingHorizontal: Spacing.xs,
+  },
+  resultSubtext: {
+    fontFamily: Fonts.body,
+    fontSize: 11,
+    color: Colors.stone,
+    marginTop: 1,
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.xs,
+    borderRadius: Radii.md,
+    marginBottom: 2,
+  },
+  resultIcon: {
+    width: 32,
+    height: 32,
     borderRadius: Radii.pill,
-    backgroundColor: Colors.yonn,
+    backgroundColor: Colors.yonnTint,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  resultText: {
+    flex: 1,
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 14,
+    color: Colors.ma,
+  },
+  resultDistance: {
+    fontFamily: Fonts.body,
+    fontSize: 12,
+    color: Colors.stone,
+  },
+  confirmCard: {
+    marginTop: Spacing.md,
+    backgroundColor: Colors.yonnTint,
+    borderRadius: Radii.lg,
+    padding: Spacing.md,
+  },
+  confirmHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  confirmIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: Radii.pill,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmText: {
+    flex: 1,
+    fontFamily: Fonts.body,
+    fontSize: 13,
+    color: Colors.yonnDark,
+  },
+  confirmDestination: {
+    fontFamily: Fonts.bodySemi,
+  },
+  confirmMetaRow: {
+    flexDirection: 'row',
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
+    marginLeft: 36,
+  },
+  confirmMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  confirmMetaText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: Colors.stone,
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.yonn,
+    borderRadius: Radii.pill,
+    marginTop: Spacing.md,
+    height: 40,
+  },
+  saveButtonDone: {
+    backgroundColor: Colors.yonnDark,
+  },
+  saveButtonText: {
+    fontFamily: Fonts.bodySemi,
+    fontSize: 13,
+    color: Colors.white,
   },
 });
