@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,17 +11,28 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import Wordmark from '../../components/auth/Wordmark';
-import PrimaryButton from '../../components/auth/PrimaryButton';
+import Wordmark from '../../components/brand/Wordmark';
+import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Colors, Fonts, Radii, Spacing } from '../../constants/theme';
-import { isValidSenegalPhone } from '../../utils/phone';
+import { isValidSenegalPhone, normalizePhone } from '../../utils/phone';
 import { sendOtp } from '../../services/auth';
+import { getLastPhone } from '../../services/session';
 
 export default function LoginScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
+  const [isReturning, setIsReturning] = useState(false);
+
+  useEffect(() => {
+    getLastPhone().then((lastPhone) => {
+      if (lastPhone) {
+        setPhone(normalizePhone(lastPhone));
+        setIsReturning(true);
+      }
+    });
+  }, []);
 
   const handleContinue = async () => {
     if (!isValidSenegalPhone(phone)) {
@@ -54,9 +65,13 @@ export default function LoginScreen() {
 
             <View style={{ height: Spacing.xxl }} />
 
-            <Text style={styles.title}>Entrez votre numéro</Text>
+            <Text style={styles.title}>
+              {isReturning ? 'Content de te revoir 👋' : 'Entrez votre numéro'}
+            </Text>
             <Text style={styles.subtitle}>
-              Nous vous enverrons un code de vérification par SMS.
+              {isReturning
+                ? 'Confirme ton numéro pour recevoir un nouveau code.'
+                : 'Nous vous enverrons un code de vérification par SMS.'}
             </Text>
 
             <View style={{ height: Spacing.lg }} />

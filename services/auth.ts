@@ -1,12 +1,13 @@
 import { User } from '../types/auth';
 import { toE164 } from '../utils/phone';
+import { getUserByPhone, createUser } from './users';
 
 // Service d'authentification par téléphone + code SMS (OTP).
 //
-// Implémentation actuelle : simulation en mémoire, sans coût et sans
-// fournisseur externe — pratique pour développer et démontrer le parcours
-// complet sans compte SMS payant. Les codes et les comptes créés ici sont
-// perdus au redémarrage de l'app (pas de vraie base de données).
+// Le code lui-même est simulé en mémoire (voir sendOtp/verifyOtp) : gratuit,
+// sans fournisseur externe, pratique pour développer et démontrer le parcours
+// complet sans compte SMS payant. Les comptes, eux, sont réels — stockés
+// dans la table Supabase `users` (voir services/users.ts).
 //
 // Pour passer en production : remplacer le contenu de sendOtp/verifyOtp
 // par un vrai fournisseur (ex: Firebase Phone Auth, ou un agrégateur SMS
@@ -18,7 +19,6 @@ const OTP_TTL_MS = 5 * 60 * 1000;
 type PendingOtp = { code: string; expiresAt: number };
 
 const pendingOtps = new Map<string, PendingOtp>();
-const users = new Map<string, User>(); // clé = numéro au format E.164
 
 function generateCode(): string {
   return Math.floor(Math.random() * 10 ** OTP_LENGTH)
@@ -49,7 +49,7 @@ export async function verifyOtp(
   }
 
   pendingOtps.delete(phone);
-  const existing = users.get(phone);
+  const existing = await getUserByPhone(phone);
   return { success: true, isNewUser: !existing, user: existing };
 }
 
@@ -59,13 +59,5 @@ export async function completeProfile(
   city?: string
 ): Promise<User> {
   const phone = toE164(rawPhone);
-  const user: User = {
-    id: phone,
-    phone,
-    fullName: fullName.trim(),
-    city: city?.trim() || undefined,
-    createdAt: new Date().toISOString(),
-  };
-  users.set(phone, user);
-  return user;
+  return createUser(phone, fullName, city);
 }

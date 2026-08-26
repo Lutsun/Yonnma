@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import Wordmark from '../components/auth/Wordmark';
+import Wordmark from '../components/brand/Wordmark';
 import { useAuth } from '../store/AuthContext';
 import { Colors } from '../constants/theme';
 
@@ -14,7 +14,7 @@ const PRESENTATION_DURATION = 1400;
 
 export default function Index() {
   const router = useRouter();
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, isRestoring } = useAuth();
   const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -24,12 +24,15 @@ export default function Index() {
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
+  }, [progress]);
 
+  useEffect(() => {
+    if (isRestoring) return;
     const timer = setTimeout(() => {
       router.replace(isLoggedIn ? '/(tabs)' : '/(auth)/login');
     }, PRESENTATION_DURATION);
     return () => clearTimeout(timer);
-  }, [isLoggedIn, router, progress]);
+  }, [isLoggedIn, isRestoring, router]);
 
   return (
     <View style={styles.container}>

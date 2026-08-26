@@ -11,8 +11,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-import AuthTextInput from '../../components/auth/AuthTextInput';
-import PrimaryButton from '../../components/auth/PrimaryButton';
+import AuthTextInput from '../../components/ui/AuthTextInput';
+import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Colors, Fonts, Spacing } from '../../constants/theme';
 import { completeProfile } from '../../services/auth';
 import { useAuth } from '../../store/AuthContext';

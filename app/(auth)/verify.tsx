@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import OtpInput from '../../components/auth/OtpInput';
-import PrimaryButton from '../../components/auth/PrimaryButton';
+import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Colors, Fonts, Radii, Spacing } from '../../constants/theme';
 import { sendOtp, verifyOtp } from '../../services/auth';
 import { useAuth } from '../../store/AuthContext';
