@@ -2,20 +2,20 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Platform,
-  Keyboard,
   Linking,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 import { useAuth } from '../../store/AuthContext';
+import { useTrip } from '../../store/TripContext';
 import {
   Colors,
   Fonts,
@@ -24,11 +24,10 @@ import {
   TAB_BAR_HEIGHT,
   TAB_BAR_BOTTOM_MARGIN,
 } from '../../constants/theme';
-import { getNearbyStops, searchStops } from '../../services/transit';
+import { getNearbyStops } from '../../services/transit';
 import { saveTrip } from '../../services/trips';
 import { Stop } from '../../types/transit';
 import { initialsOf } from '../../utils/text';
-import { distanceKm, estimateTripMinutes, formatDistance } from '../../utils/eta';
 
 const DAKAR_REGION: Region = {
   latitude: 14.6928,
@@ -37,11 +36,15 @@ const DAKAR_REGION: Region = {
   longitudeDelta: 0.045,
 };
 
-const SEARCH_DEBOUNCE_MS = 300;
-
+// Écran d'accueil volontairement minimal, façon Yango : la carte occupe tout
+// l'espace, une seule barre de recherche mène au planificateur d'itinéraire.
+// Quand un trajet est calculé, cette même carte devient le guide pas à pas
+// (arrêt à prendre, correspondances, descente) — voir `activeTrip`.
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { user } = useAuth();
+  const { activeTrip, clearActiveTrip } = useTrip();
   const mapRef = useRef<MapView>(null);
 
   const [region, setRegion] = useState<Region>(DAKAR_REGION);
@@ -50,10 +53,6 @@ export default function HomeScreen() {
   const [reducedAccuracy, setReducedAccuracy] = useState(false);
   const [stops, setStops] = useState<Stop[]>([]);
   const [stopsError, setStopsError] = useState(false);
-
-  const [destination, setDestination] = useState('');
-  const [searchResults, setSearchResults] = useState<Stop[]>([]);
-  const [selectedDestination, setSelectedDestination] = useState<Stop | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -90,7 +89,7 @@ export default function HomeScreen() {
         longitudeDelta: 0.02,
       };
       setRegion(next);
-      mapRef.current?.animateToRegion(next, 500);
+      if (!activeTrip) mapRef.current?.animateToRegion(next, 500);
       await loadNearbyStops(next.latitude, next.longitude);
     } finally {
       setLoadingLocation(false);
@@ -101,7 +100,7 @@ export default function HomeScreen() {
     locateMe();
 
     // Suit la position réelle en continu (pas juste un relevé ponctuel),
-    // pour que le point bleu et l'origine des trajets restent exacts.
+    // pour que le point bleu reste exact.
     let subscription: Location.LocationSubscription | undefined;
     Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 15 },
@@ -120,73 +119,40 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Recherche d'arrêts au fil de la frappe (avec un petit délai pour ne pas
-  // interroger la base à chaque lettre tapée).
+  // Cadre la carte sur l'itinéraire dès qu'un trajet est calculé.
   useEffect(() => {
-    if (selectedDestination || !destination.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    const timer = setTimeout(() => {
-      searchStops(destination)
-        .then(setSearchResults)
-        .catch(() => setSearchResults([]));
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [destination, selectedDestination]);
-
-  const firstName = user?.fullName?.trim().split(/\s+/)[0];
-  const initials = user ? initialsOf(user.fullName) : '';
-
-  const tripEstimate = selectedDestination
-    ? distanceKm(region.latitude, region.longitude, selectedDestination.latitude, selectedDestination.longitude)
-    : null;
-
-  const handleSelectResult = (stop: Stop) => {
-    setSelectedDestination(stop);
-    setDestination(stop.name);
-    setSearchResults([]);
+    if (!activeTrip) return;
     setSaved(false);
-    Keyboard.dismiss();
-    // Cadre la carte pour montrer à la fois ta position et l'arrêt choisi,
-    // avec le trajet vert entre les deux (comme sur Yango).
-    mapRef.current?.fitToCoordinates(
-      [
-        { latitude: region.latitude, longitude: region.longitude },
-        { latitude: stop.latitude, longitude: stop.longitude },
-      ],
-      {
-        edgePadding: { top: 120, right: 80, bottom: 280, left: 80 },
+    const coords = activeTrip.plan.segments.flatMap((s) => s.path);
+    if (coords.length > 0) {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 140, right: 60, bottom: 340, left: 60 },
         animated: true,
-      }
-    );
-  };
-
-  const handleClearDestination = () => {
-    setDestination('');
-    setSelectedDestination(null);
-    setSearchResults([]);
-    setSaved(false);
-  };
+      });
+    }
+  }, [activeTrip]);
 
   const handleSaveTrip = async () => {
-    if (!user || !selectedDestination) return;
+    if (!user || !activeTrip) return;
     setSaving(true);
     try {
       await saveTrip({
         userId: user.id,
-        originLabel: 'Ma position actuelle',
-        originLatitude: region.latitude,
-        originLongitude: region.longitude,
-        destinationLabel: selectedDestination.name,
-        destinationLatitude: selectedDestination.latitude,
-        destinationLongitude: selectedDestination.longitude,
+        originLabel: activeTrip.origin.name,
+        originLatitude: activeTrip.origin.latitude,
+        originLongitude: activeTrip.origin.longitude,
+        destinationLabel: activeTrip.destination.name,
+        destinationLatitude: activeTrip.destination.latitude,
+        destinationLongitude: activeTrip.destination.longitude,
       });
       setSaved(true);
     } finally {
       setSaving(false);
     }
   };
+
+  const firstName = user?.fullName?.trim().split(/\s+/)[0];
+  const initials = user ? initialsOf(user.fullName) : '';
 
   return (
     <View style={styles.container}>
@@ -198,40 +164,58 @@ export default function HomeScreen() {
         showsMyLocationButton={false}
         showsCompass={false}
       >
-        {stops.map((stop) => (
-          <Marker
-            key={stop.id}
-            coordinate={stop}
-            anchor={{ x: 0.5, y: 0.5 }}
-          >
-            <View style={styles.pin}>
-              <Ionicons name="bus" size={14} color={Colors.white} />
-            </View>
-            <Callout tooltip={false}>
-              <View style={styles.callout}>
-                <Text style={styles.calloutTitle}>{stop.name}</Text>
-                <Text style={styles.calloutLines}>
-                  {stop.lines && stop.lines.length > 0
-                    ? stop.lines.join(' · ')
-                    : 'Aucune ligne renseignée'}
-                </Text>
+        {!activeTrip &&
+          stops.map((stop) => (
+            <Marker key={stop.id} coordinate={stop} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={styles.pin}>
+                <Ionicons name="bus" size={14} color={Colors.white} />
               </View>
-            </Callout>
-          </Marker>
-        ))}
+              <Callout tooltip={false}>
+                <View style={styles.callout}>
+                  <Text style={styles.calloutTitle}>{stop.name}</Text>
+                  <Text style={styles.calloutLines}>
+                    {stop.lines && stop.lines.length > 0
+                      ? stop.lines.join(' · ')
+                      : 'Aucune ligne renseignée'}
+                  </Text>
+                </View>
+              </Callout>
+            </Marker>
+          ))}
 
-        {selectedDestination && (
+        {activeTrip && (
           <>
-            <Polyline
-              coordinates={[
-                { latitude: region.latitude, longitude: region.longitude },
-                { latitude: selectedDestination.latitude, longitude: selectedDestination.longitude },
-              ]}
-              strokeColor={Colors.yonn}
-              strokeWidth={4}
-              lineDashPattern={[1]}
-            />
-            <Marker coordinate={selectedDestination} anchor={{ x: 0.5, y: 1 }}>
+            {activeTrip.plan.segments.map((segment, index) => (
+              <Polyline
+                key={index}
+                coordinates={segment.path}
+                strokeColor={segment.type === 'ride' ? segment.lineColor : Colors.stone}
+                strokeWidth={segment.type === 'ride' ? 5 : 3}
+                lineDashPattern={segment.type === 'walk' ? [8, 6] : undefined}
+              />
+            ))}
+
+            <Marker coordinate={activeTrip.origin} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={styles.originPin}>
+                <View style={styles.originPinDot} />
+              </View>
+            </Marker>
+
+            {activeTrip.plan.segments
+              .filter((s): s is Extract<typeof s, { type: 'ride' }> => s.type === 'ride')
+              .map((segment) => (
+                <Marker
+                  key={segment.lineId + segment.boardStopId}
+                  coordinate={segment.path[0]}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                >
+                  <View style={[styles.boardPin, { backgroundColor: segment.lineColor }]}>
+                    <Text style={styles.boardPinText}>{segment.lineCode}</Text>
+                  </View>
+                </Marker>
+              ))}
+
+            <Marker coordinate={activeTrip.destination} anchor={{ x: 0.5, y: 1 }}>
               <Ionicons name="location" size={36} color={Colors.danger} />
             </Marker>
           </>
@@ -244,195 +228,190 @@ export default function HomeScreen() {
         </View>
       )}
 
-      <View style={[styles.topBar, { paddingTop: insets.top + Spacing.sm }]}>
-        <View style={styles.greetingCard}>
-          <View style={styles.greetingAvatar}>
-            <Text style={styles.greetingAvatarText}>{initials}</Text>
+      {!activeTrip && (
+        <View style={[styles.topBar, { paddingTop: insets.top + Spacing.sm }]}>
+          <View style={styles.greetingCard}>
+            <View style={styles.greetingAvatar}>
+              <Text style={styles.greetingAvatarText}>{initials}</Text>
+            </View>
+            <Text style={styles.greeting}>Bonjour{firstName ? ` ${firstName}` : ''} 👋</Text>
           </View>
-          <View>
-            <Text style={styles.greeting}>
-              Bonjour{firstName ? ` ${firstName}` : ''} 👋
-            </Text>
-            <Text style={styles.subGreeting}>Où veux-tu aller aujourd'hui ?</Text>
-          </View>
-        </View>
 
-        {locationDenied && (
-          <TouchableOpacity style={styles.notice} onPress={() => Linking.openSettings()}>
-            <Ionicons name="information-circle" size={18} color={Colors.yonn} />
-            <Text style={styles.noticeText}>
-              Active ta position dans Réglages pour voir les arrêts autour de toi.
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {reducedAccuracy && (
-          <TouchableOpacity style={styles.notice} onPress={() => Linking.openSettings()}>
-            <Ionicons name="locate" size={18} color={Colors.yonn} />
-            <Text style={styles.noticeText}>
-              Position approximative activée — appuie ici pour activer la position précise dans
-              Réglages et voir ton point exact.
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {stopsError && (
-          <View style={styles.notice}>
-            <Ionicons name="warning" size={18} color={Colors.yonn} />
-            <Text style={styles.noticeText}>
-              Impossible de charger les arrêts pour le moment.
-            </Text>
-          </View>
-        )}
-      </View>
-
-      <View
-        style={[
-          styles.locateButtonWrap,
-          { bottom: insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.xl + 96 },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.locateButton}
-          onPress={locateMe}
-          accessibilityRole="button"
-          accessibilityLabel="Centrer sur ma position"
-        >
-          <Ionicons name="locate" size={22} color={Colors.yonn} />
-        </TouchableOpacity>
-      </View>
-
-      <View
-        style={[
-          styles.bottomCard,
-          { bottom: insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.sm },
-        ]}
-      >
-        <View style={styles.handle} />
-        <View style={styles.searchRow}>
-          <Ionicons name="search" size={20} color={Colors.stone} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Où voulez-vous aller ?"
-            placeholderTextColor={Colors.stone}
-            value={destination}
-            onChangeText={(t) => {
-              setDestination(t);
-              if (selectedDestination) setSelectedDestination(null);
-            }}
-            returnKeyType="search"
-          />
-          {destination.length > 0 && (
-            <TouchableOpacity
-              onPress={handleClearDestination}
-              accessibilityRole="button"
-              accessibilityLabel="Effacer la recherche"
-            >
-              <Ionicons name="close-circle" size={20} color={Colors.stone} />
+          {locationDenied && (
+            <TouchableOpacity style={styles.notice} onPress={() => Linking.openSettings()}>
+              <Ionicons name="information-circle" size={18} color={Colors.yonn} />
+              <Text style={styles.noticeText}>
+                Active ta position dans Réglages pour voir les arrêts autour de toi.
+              </Text>
             </TouchableOpacity>
           )}
+
+          {reducedAccuracy && (
+            <TouchableOpacity style={styles.notice} onPress={() => Linking.openSettings()}>
+              <Ionicons name="locate" size={18} color={Colors.yonn} />
+              <Text style={styles.noticeText}>
+                Position approximative activée — appuie ici pour activer la position précise.
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {stopsError && (
+            <View style={styles.notice}>
+              <Ionicons name="warning" size={18} color={Colors.yonn} />
+              <Text style={styles.noticeText}>Impossible de charger les arrêts pour le moment.</Text>
+            </View>
+          )}
         </View>
+      )}
 
-        {searchResults.length > 0 && (
-          <View style={styles.resultsList}>
-            {searchResults.map((stop) => (
-              <TouchableOpacity
-                key={stop.id}
-                style={styles.resultRow}
-                activeOpacity={0.6}
-                onPress={() => handleSelectResult(stop)}
-              >
-                <View style={styles.resultIcon}>
-                  <Ionicons name="bus" size={16} color={Colors.yonn} />
-                </View>
-                <Text style={styles.resultText}>{stop.name}</Text>
-                <Ionicons name="chevron-forward" size={16} color={Colors.stoneLight} />
-              </TouchableOpacity>
-            ))}
+      {activeTrip && (
+        <TouchableOpacity
+          style={[styles.closeTripButton, { top: insets.top + Spacing.sm }]}
+          onPress={clearActiveTrip}
+          accessibilityRole="button"
+          accessibilityLabel="Fermer l'itinéraire"
+        >
+          <Ionicons name="close" size={22} color={Colors.ma} />
+        </TouchableOpacity>
+      )}
+
+      {!activeTrip && (
+        <View
+          style={[
+            styles.locateButtonWrap,
+            { bottom: insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.xl + 24 },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.locateButton}
+            onPress={locateMe}
+            accessibilityRole="button"
+            accessibilityLabel="Centrer sur ma position"
+          >
+            <Ionicons name="locate" size={22} color={Colors.yonn} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!activeTrip && (
+        <TouchableOpacity
+          style={[
+            styles.searchBar,
+            { bottom: insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.sm },
+          ]}
+          activeOpacity={0.85}
+          onPress={() => router.push('/(modals)/itinerary')}
+        >
+          <View style={styles.searchIcon}>
+            <Ionicons name="search" size={18} color={Colors.yonn} />
           </View>
-        )}
+          <Text style={styles.searchText}>Où allez-vous ?</Text>
+        </TouchableOpacity>
+      )}
 
-        {!selectedDestination && !destination.trim() && stops.length > 0 && (
-          <View style={styles.resultsList}>
-            <Text style={styles.suggestionsTitle}>Arrêts à proximité</Text>
-            {stops.slice(0, 4).map((stop) => (
-              <TouchableOpacity
-                key={stop.id}
-                style={styles.resultRow}
-                activeOpacity={0.6}
-                onPress={() => handleSelectResult(stop)}
-              >
-                <View style={styles.resultIcon}>
-                  <Ionicons name="bus" size={16} color={Colors.yonn} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.resultText}>{stop.name}</Text>
-                  {!!stop.lines?.length && (
-                    <Text style={styles.resultSubtext} numberOfLines={1}>
-                      {stop.lines.join(' · ')}
-                    </Text>
-                  )}
-                </View>
-                {typeof stop.distance_meters === 'number' && (
-                  <Text style={styles.resultDistance}>
-                    {formatDistance(stop.distance_meters / 1000)}
-                  </Text>
-                )}
-                <Ionicons name="chevron-forward" size={16} color={Colors.stoneLight} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+      {activeTrip && (
+        <View
+          style={[
+            styles.guideCard,
+            { bottom: insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.sm },
+          ]}
+        >
+          <View style={styles.handle} />
 
-        {selectedDestination && tripEstimate !== null && (
-          <View style={styles.confirmCard}>
-            <View style={styles.confirmHeader}>
-              <View style={styles.confirmIcon}>
-                <Ionicons name="navigate" size={16} color={Colors.yonn} />
+          <View style={styles.guideHeader}>
+            <View>
+              <Text style={styles.guideRoute} numberOfLines={1}>
+                {activeTrip.origin.name} → {activeTrip.destination.name}
+              </Text>
+              <View style={styles.guideMetaRow}>
+                <Ionicons name="time-outline" size={14} color={Colors.stone} />
+                <Text style={styles.guideMetaText}>{activeTrip.plan.totalMinutes} min</Text>
+                <Ionicons name="cash-outline" size={14} color={Colors.stone} style={{ marginLeft: Spacing.sm }} />
+                <Text style={styles.guideMetaText}>{activeTrip.plan.totalFareFcfa} FCFA</Text>
               </View>
-              <Text style={styles.confirmText} numberOfLines={1}>
-                Trajet vers <Text style={styles.confirmDestination}>{selectedDestination.name}</Text>
+            </View>
+          </View>
+
+          <ScrollView style={styles.guideSteps} showsVerticalScrollIndicator={false}>
+            <View style={styles.stepRow}>
+              <View style={styles.stepMarkerCol}>
+                <View style={styles.stepDotOrigin} />
+                <View style={styles.stepLine} />
+              </View>
+              <Text style={styles.stepText}>
+                Départ : <Text style={styles.stepBold}>{activeTrip.origin.name}</Text>
               </Text>
             </View>
 
-            <View style={styles.confirmMetaRow}>
-              <View style={styles.confirmMeta}>
-                <Ionicons name="time-outline" size={14} color={Colors.stone} />
-                <Text style={styles.confirmMetaText}>
-                  ~{estimateTripMinutes(tripEstimate)} min (estimation)
-                </Text>
+            {activeTrip.plan.segments.map((segment, index) => {
+              const isLast = index === activeTrip.plan.segments.length - 1;
+              return (
+                <View key={index} style={styles.stepRow}>
+                  <View style={styles.stepMarkerCol}>
+                    {segment.type === 'ride' ? (
+                      <View style={[styles.stepDotLine, { backgroundColor: segment.lineColor }]}>
+                        <Text style={styles.stepDotLineText}>{segment.lineCode.replace('Ligne ', '')}</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.stepDotWalk}>
+                        <Ionicons name="walk" size={12} color={Colors.stone} />
+                      </View>
+                    )}
+                    {!isLast && <View style={styles.stepLine} />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    {segment.type === 'ride' ? (
+                      <>
+                        <Text style={styles.stepText}>
+                          Prendre <Text style={styles.stepBold}>{segment.lineCode}</Text> ({segment.operatorShortName})
+                        </Text>
+                        <Text style={styles.stepSubtext}>
+                          Descendre à {segment.alightStopName} · {segment.minutes} min
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={styles.stepText}>
+                        Marcher jusqu'à <Text style={styles.stepBold}>{segment.toStopName}</Text> ({segment.minutes}{' '}
+                        min)
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+
+            <View style={styles.stepRow}>
+              <View style={styles.stepMarkerCol}>
+                <Ionicons name="location" size={18} color={Colors.danger} />
               </View>
-              <View style={styles.confirmMeta}>
-                <Ionicons name="navigate-outline" size={14} color={Colors.stone} />
-                <Text style={styles.confirmMetaText}>{formatDistance(tripEstimate)}</Text>
-              </View>
+              <Text style={styles.stepText}>
+                Arrivée : <Text style={styles.stepBold}>{activeTrip.destination.name}</Text>
+              </Text>
             </View>
 
-            <TouchableOpacity
-              style={[styles.saveButton, saved && styles.saveButtonDone]}
-              onPress={handleSaveTrip}
-              disabled={saving || saved}
-              accessibilityRole="button"
-              accessibilityLabel="Enregistrer ce trajet"
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color={Colors.white} />
-              ) : (
-                <>
-                  <Ionicons
-                    name={saved ? 'checkmark' : 'bookmark'}
-                    size={16}
-                    color={Colors.white}
-                  />
-                  <Text style={styles.saveButtonText}>
-                    {saved ? 'Enregistré' : 'Enregistrer ce trajet'}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
+            {!!user && (
+              <TouchableOpacity
+                style={[styles.saveButton, saved && styles.saveButtonDone]}
+                onPress={handleSaveTrip}
+                disabled={saving || saved}
+                accessibilityRole="button"
+                accessibilityLabel="Enregistrer ce trajet"
+              >
+                {saving ? (
+                  <ActivityIndicator size="small" color={Colors.white} />
+                ) : (
+                  <>
+                    <Ionicons name={saved ? 'checkmark' : 'bookmark'} size={16} color={Colors.white} />
+                    <Text style={styles.saveButtonText}>
+                      {saved ? 'Trajet enregistré' : 'Enregistrer ce trajet'}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </ScrollView>
+        </View>
+      )}
     </View>
   );
 }
@@ -469,28 +448,22 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   greetingAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.yonnTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
   greetingAvatarText: {
     fontFamily: Fonts.bodySemi,
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.yonn,
   },
   greeting: {
-    fontFamily: Fonts.display,
-    fontSize: 18,
+    fontFamily: Fonts.bodySemi,
+    fontSize: 15,
     color: Colors.ma,
-  },
-  subGreeting: {
-    fontFamily: Fonts.body,
-    fontSize: 13,
-    color: Colors.stone,
-    marginTop: 2,
   },
   notice: {
     flexDirection: 'row',
@@ -543,6 +516,54 @@ const styles = StyleSheet.create({
     color: Colors.stone,
     marginTop: 2,
   },
+  originPin: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.yonn,
+  },
+  originPinDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.yonn,
+  },
+  boardPin: {
+    borderRadius: Radii.pill,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderWidth: 2,
+    borderColor: Colors.white,
+    shadowColor: Colors.ma,
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  boardPinText: {
+    fontFamily: Fonts.bodySemi,
+    fontSize: 11,
+    color: Colors.white,
+  },
+  closeTripButton: {
+    position: 'absolute',
+    right: Spacing.lg,
+    width: 40,
+    height: 40,
+    borderRadius: Radii.pill,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.ma,
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
   locateButtonWrap: {
     position: 'absolute',
     right: Spacing.lg,
@@ -560,20 +581,51 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 4,
   },
-  bottomCard: {
+  searchBar: {
     position: 'absolute',
     left: Spacing.lg,
     right: Spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    height: 60,
+    backgroundColor: Colors.white,
+    borderRadius: Radii.xl,
+    paddingHorizontal: Spacing.sm,
+    shadowColor: Colors.ma,
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  searchIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: Radii.pill,
+    backgroundColor: Colors.yonnTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchText: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 15,
+    color: Colors.stone,
+  },
+  guideCard: {
+    position: 'absolute',
+    left: Spacing.lg,
+    right: Spacing.lg,
+    maxHeight: 360,
     backgroundColor: Colors.white,
     borderRadius: Radii.xl,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
     paddingBottom: Spacing.md,
     shadowColor: Colors.ma,
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: Platform.OS === 'android' ? 8 : 6,
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
   },
   handle: {
     alignSelf: 'center',
@@ -583,110 +635,87 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.stoneLight,
     marginBottom: Spacing.sm,
   },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.fill,
-    borderRadius: Radii.pill,
-    paddingHorizontal: Spacing.md,
-    height: 52,
+  guideHeader: {
+    marginBottom: Spacing.sm,
   },
-  searchInput: {
-    flex: 1,
-    fontFamily: Fonts.body,
-    fontSize: 15,
+  guideRoute: {
+    fontFamily: Fonts.displaySemi,
+    fontSize: 16,
     color: Colors.ma,
   },
-  resultsList: {
-    marginTop: Spacing.sm,
-  },
-  suggestionsTitle: {
-    fontFamily: Fonts.bodySemi,
-    fontSize: 12,
-    color: Colors.stone,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: Spacing.xs,
-    paddingHorizontal: Spacing.xs,
-  },
-  resultSubtext: {
-    fontFamily: Fonts.body,
-    fontSize: 11,
-    color: Colors.stone,
-    marginTop: 1,
-  },
-  resultRow: {
+  guideMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
-    paddingHorizontal: Spacing.xs,
-    borderRadius: Radii.md,
-    marginBottom: 2,
+    gap: 4,
+    marginTop: 4,
   },
-  resultIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: Radii.pill,
-    backgroundColor: Colors.yonnTint,
+  guideMetaText: {
+    fontFamily: Fonts.bodySemi,
+    fontSize: 13,
+    color: Colors.yonnDark,
+  },
+  guideSteps: {
+    maxHeight: 260,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  stepMarkerCol: {
+    width: 24,
+    alignItems: 'center',
+  },
+  stepDotOrigin: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.yonn,
+    marginTop: 4,
+  },
+  stepDotWalk: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  resultText: {
+  stepDotLine: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepDotLineText: {
+    fontFamily: Fonts.bodySemi,
+    fontSize: 10,
+    color: Colors.white,
+  },
+  stepLine: {
+    width: 2,
+    flex: 1,
+    minHeight: 20,
+    backgroundColor: Colors.stoneLight,
+    marginVertical: 2,
+  },
+  stepText: {
     flex: 1,
     fontFamily: Fonts.bodyMedium,
     fontSize: 14,
     color: Colors.ma,
+    paddingBottom: Spacing.md,
+    paddingTop: 2,
   },
-  resultDistance: {
+  stepSubtext: {
     fontFamily: Fonts.body,
     fontSize: 12,
     color: Colors.stone,
+    marginTop: 2,
   },
-  confirmCard: {
-    marginTop: Spacing.md,
-    backgroundColor: Colors.yonnTint,
-    borderRadius: Radii.lg,
-    padding: Spacing.md,
-  },
-  confirmHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  confirmIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: Radii.pill,
-    backgroundColor: Colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmText: {
-    flex: 1,
-    fontFamily: Fonts.body,
-    fontSize: 13,
-    color: Colors.yonnDark,
-  },
-  confirmDestination: {
+  stepBold: {
     fontFamily: Fonts.bodySemi,
-  },
-  confirmMetaRow: {
-    flexDirection: 'row',
-    gap: Spacing.md,
-    marginTop: Spacing.sm,
-    marginLeft: 36,
-  },
-  confirmMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  confirmMetaText: {
-    fontFamily: Fonts.bodyMedium,
-    fontSize: 12,
-    color: Colors.stone,
   },
   saveButton: {
     flexDirection: 'row',
@@ -695,8 +724,9 @@ const styles = StyleSheet.create({
     gap: 6,
     backgroundColor: Colors.yonn,
     borderRadius: Radii.pill,
-    marginTop: Spacing.md,
-    height: 40,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.md,
+    height: 44,
   },
   saveButtonDone: {
     backgroundColor: Colors.yonnDark,

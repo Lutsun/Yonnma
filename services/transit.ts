@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Line, Operator, Stop } from '../types/transit';
+import { Line, Operator, RouteGraphRow, Stop } from '../types/transit';
 
 export async function getOperators(): Promise<Operator[]> {
   const { data, error } = await supabase.from('operators').select('*');
@@ -42,6 +42,15 @@ export async function getNearbyStops(
     lng: longitude,
     radius_meters: radiusMeters,
   });
+  if (error) throw error;
+  return data;
+}
+
+// Le réseau complet (toutes les lignes et leurs arrêts, dans l'ordre), via
+// la fonction PostGIS `get_route_graph` — utilisé par le planificateur
+// d'itinéraire (services/routing.ts) pour construire son graphe de trajet.
+export async function getRouteGraph(): Promise<RouteGraphRow[]> {
+  const { data, error } = await supabase.rpc('get_route_graph');
   if (error) throw error;
   return data;
 }

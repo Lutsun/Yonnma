@@ -38,8 +38,7 @@
         {
           "locationWhenInUsePermission": "Yonnma utilise ta position pour te montrer les arrêts de bus autour de toi."
         }
-      ],
-      "expo-secure-store"
+      ]
     ],
     "scheme": "yonnma"
   }

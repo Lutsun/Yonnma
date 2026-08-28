@@ -14,7 +14,7 @@ const PRESENTATION_DURATION = 1400;
 
 export default function Index() {
   const router = useRouter();
-  const { isLoggedIn, isRestoring } = useAuth();
+  const { isLoggedIn, isRestoring, needsProfile, session } = useAuth();
   const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -29,10 +29,19 @@ export default function Index() {
   useEffect(() => {
     if (isRestoring) return;
     const timer = setTimeout(() => {
-      router.replace(isLoggedIn ? '/(tabs)' : '/(auth)/login');
+      if (isLoggedIn) {
+        router.replace('/(tabs)');
+      } else if (needsProfile) {
+        router.replace({
+          pathname: '/(auth)/complete-profile',
+          params: { phone: session?.user.phone ?? '' },
+        });
+      } else {
+        router.replace('/(auth)/login');
+      }
     }, PRESENTATION_DURATION);
     return () => clearTimeout(timer);
-  }, [isLoggedIn, isRestoring, router]);
+  }, [isLoggedIn, isRestoring, needsProfile, session, router]);
 
   return (
     <View style={styles.container}>

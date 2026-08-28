@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Session } from '@supabase/supabase-js';
 
 import AuthTextInput from '../../components/ui/AuthTextInput';
 import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Colors, Fonts, Spacing } from '../../constants/theme';
-import { completeProfile } from '../../services/auth';
+import { supabase } from '../../services/supabase';
+import { createProfile } from '../../services/profile';
 import { useAuth } from '../../store/AuthContext';
+import { toE164 } from '../../utils/phone';
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -25,12 +28,19 @@ function initialsOf(name: string): string {
 
 export default function CompleteProfileScreen() {
   const router = useRouter();
-  const { login } = useAuth();
+  const { refreshProfile } = useAuth();
   const { phone } = useLocalSearchParams<{ phone: string }>();
+  const [session, setSession] = useState<Session | null>(null);
   const [fullName, setFullName] = useState('');
   const [city, setCity] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
+
+  // On récupère la session Supabase Auth déjà ouverte par l'écran de
+  // vérification, plutôt que de la faire transiter par la navigation.
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+  }, []);
 
   const initials = initialsOf(fullName);
 
@@ -39,11 +49,15 @@ export default function CompleteProfileScreen() {
       setError('Entre ton nom complet');
       return;
     }
+    if (!session?.user) {
+      setError('Session expirée, reconnecte-toi.');
+      return;
+    }
     setError(undefined);
     setLoading(true);
     try {
-      const user = await completeProfile(phone, fullName, city);
-      login(user);
+      await createProfile(session.user.id, session.user.phone ?? toE164(phone), fullName, city);
+      await refreshProfile();
       router.replace('/(tabs)');
     } finally {
       setLoading(false);

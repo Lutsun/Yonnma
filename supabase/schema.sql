@@ -8,7 +8,7 @@
 --   lines           -> les lignes de bus (ex: "Ligne 40", "B1")
 --   stops           -> les arrêts, avec leur position GPS (PostGIS)
 --   line_stops      -> l'ordre des arrêts sur chaque ligne
---   users           -> les comptes Yonnma (téléphone + nom, pas de mot de passe)
+--   profiles        -> infos Yonnma (nom, ville) liées à un compte Supabase Auth
 --   user_trips      -> les trajets recherchés / enregistrés par un utilisateur
 --   favorite_lines  -> les lignes de bus mises en favori par un utilisateur
 
@@ -37,6 +37,10 @@ create table if not exists lines (
 
 create index if not exists lines_operator_id_idx on lines (operator_id);
 create unique index if not exists lines_operator_code_idx on lines (operator_id, code);
+
+-- Prix du ticket (FCFA), forfaitaire par ligne — utilisé par le planificateur
+-- d'itinéraire pour estimer le coût total d'un trajet.
+alter table lines add column if not exists fare_fcfa int not null default 200;
 
 -- 4. Arrêts -------------------------------------------------------------
 create table if not exists stops (
@@ -158,21 +162,68 @@ as $$
   limit 8;
 $$;
 
+-- Fonction : le réseau complet (chaque ligne et ses arrêts, dans l'ordre),
+-- en un seul aller-retour réseau. C'est ce que le planificateur d'itinéraire
+-- (services/routing.ts) utilise pour construire son graphe de trajet et
+-- calculer le meilleur itinéraire, les correspondances, le temps et le coût.
+create or replace function get_route_graph()
+returns table (
+  line_id uuid,
+  line_code text,
+  line_name text,
+  line_color text,
+  fare_fcfa int,
+  operator_short_name text,
+  operator_color text,
+  stop_id uuid,
+  stop_name text,
+  latitude double precision,
+  longitude double precision,
+  sequence int
+)
+language sql
+stable
+as $$
+  select
+    l.id, l.code, l.name, l.color, l.fare_fcfa,
+    o.short_name, o.color,
+    s.id, s.name,
+    st_y(s.location::geometry), st_x(s.location::geometry),
+    ls.sequence
+  from line_stops ls
+  join lines l on l.id = ls.line_id
+  join operators o on o.id = l.operator_id
+  join stops s on s.id = ls.stop_id
+  order by l.id, ls.sequence;
+$$;
+
 -- 6. Utilisateurs -------------------------------------------------------
--- Connexion par téléphone + code SMS uniquement (voir services/auth.ts) —
--- pas de mot de passe, pas d'e-mail requis.
-create table if not exists users (
-  id uuid primary key default gen_random_uuid(),
-  phone text not null unique,        -- format international, ex: +221771234567
+-- Vraie authentification Supabase Auth (téléphone + code SMS, voir
+-- Authentication > Providers > Phone dans le dashboard) — pas de mot de
+-- passe, pas d'e-mail requis. Chaque compte est un vrai `auth.users`;
+-- `profiles` ne stocke que les infos propres à Yonnma (nom, ville), liées
+-- par le même id. Le téléphone n'est pas dupliqué ici : il vit déjà dans
+-- `auth.users` et l'app le lit via `session.user.phone`.
+create table if not exists profiles (
+  id uuid primary key references auth.users (id) on delete cascade,
   full_name text not null,
   city text,
   created_at timestamptz not null default now()
 );
 
+alter table profiles enable row level security;
+
+drop policy if exists "Lecture de son propre profil" on profiles;
+create policy "Lecture de son propre profil" on profiles for select using (auth.uid() = id);
+drop policy if exists "Création de son propre profil" on profiles;
+create policy "Création de son propre profil" on profiles for insert with check (auth.uid() = id);
+drop policy if exists "Mise à jour de son propre profil" on profiles;
+create policy "Mise à jour de son propre profil" on profiles for update using (auth.uid() = id);
+
 -- 7. Trajets recherchés / enregistrés par un utilisateur -----------------
 create table if not exists user_trips (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users (id) on delete cascade,
+  user_id uuid not null references profiles (id) on delete cascade,
   origin_label text not null,
   origin_location geography(point, 4326) not null,
   destination_label text not null,
@@ -182,6 +233,13 @@ create table if not exists user_trips (
 );
 
 create index if not exists user_trips_user_id_idx on user_trips (user_id);
+
+-- Si cette table existait déjà avec une clé étrangère vers l'ancienne table
+-- `users`, on la remplace par une référence à `profiles` (rejouable sans
+-- erreur, y compris sur une base neuve où c'est déjà le cas).
+alter table user_trips drop constraint if exists user_trips_user_id_fkey;
+alter table user_trips
+  add constraint user_trips_user_id_fkey foreign key (user_id) references profiles (id) on delete cascade;
 
 -- Fonction : enregistrer un trajet en favori (utilisée par le bouton
 -- "Enregistrer" quand on choisit une destination sur l'écran d'accueil).
@@ -213,11 +271,15 @@ $$;
 
 -- 8. Lignes favorites ----------------------------------------------------
 create table if not exists favorite_lines (
-  user_id uuid not null references users (id) on delete cascade,
+  user_id uuid not null references profiles (id) on delete cascade,
   line_id uuid not null references lines (id) on delete cascade,
   created_at timestamptz not null default now(),
   primary key (user_id, line_id)
 );
+
+alter table favorite_lines drop constraint if exists favorite_lines_user_id_fkey;
+alter table favorite_lines
+  add constraint favorite_lines_user_id_fkey foreign key (user_id) references profiles (id) on delete cascade;
 
 -- 9. Sécurité (Row Level Security) ---------------------------------------
 -- Les données de transport (lignes, arrêts) sont publiques en lecture.
@@ -226,27 +288,33 @@ alter table operators enable row level security;
 alter table lines enable row level security;
 alter table stops enable row level security;
 alter table line_stops enable row level security;
-alter table users enable row level security;
 alter table user_trips enable row level security;
 alter table favorite_lines enable row level security;
 
+-- (chaque policy est précédée d'un DROP POLICY IF EXISTS pour que ce fichier
+-- reste rejouable sans erreur si on l'exécute plusieurs fois)
+drop policy if exists "Lecture publique des opérateurs" on operators;
 create policy "Lecture publique des opérateurs" on operators for select using (true);
+drop policy if exists "Lecture publique des lignes" on lines;
 create policy "Lecture publique des lignes" on lines for select using (true);
+drop policy if exists "Lecture publique des arrêts" on stops;
 create policy "Lecture publique des arrêts" on stops for select using (true);
+drop policy if exists "Lecture publique des arrêts de ligne" on line_stops;
 create policy "Lecture publique des arrêts de ligne" on line_stops for select using (true);
 
--- ⚠️ Comme l'app utilise sa propre connexion téléphone+SMS (et non Supabase
--- Auth), on ne peut pas encore filtrer "l'utilisateur courant" avec auth.uid().
--- Ces policies restent ouvertes pour le moment — à resserrer quand l'app
--- passera par Supabase Auth (téléphone) ou un jeton signé côté serveur.
-create policy "Lecture des utilisateurs (temporaire)" on users for select using (true);
-create policy "Création de compte (temporaire)" on users for insert with check (true);
-create policy "Mise à jour de compte (temporaire)" on users for update using (true);
+-- Vraie authentification Supabase Auth : chaque requête porte le jeton de
+-- l'utilisateur connecté, donc auth.uid() est fiable — les données d'un
+-- utilisateur ne sont plus jamais lisibles ou modifiables par un autre.
+drop policy if exists "Lecture de ses propres trajets" on user_trips;
+create policy "Lecture de ses propres trajets" on user_trips for select using (auth.uid() = user_id);
+drop policy if exists "Création de ses propres trajets" on user_trips;
+create policy "Création de ses propres trajets" on user_trips for insert with check (auth.uid() = user_id);
+drop policy if exists "Suppression de ses propres trajets" on user_trips;
+create policy "Suppression de ses propres trajets" on user_trips for delete using (auth.uid() = user_id);
 
-create policy "Lecture des trajets (temporaire)" on user_trips for select using (true);
-create policy "Création de trajet (temporaire)" on user_trips for insert with check (true);
-create policy "Suppression de trajet (temporaire)" on user_trips for delete using (true);
-
-create policy "Lecture des lignes favorites (temporaire)" on favorite_lines for select using (true);
-create policy "Ajout d'une ligne favorite (temporaire)" on favorite_lines for insert with check (true);
-create policy "Retrait d'une ligne favorite (temporaire)" on favorite_lines for delete using (true);
+drop policy if exists "Lecture de ses lignes favorites" on favorite_lines;
+create policy "Lecture de ses lignes favorites" on favorite_lines for select using (auth.uid() = user_id);
+drop policy if exists "Ajout d'une ligne favorite" on favorite_lines;
+create policy "Ajout d'une ligne favorite" on favorite_lines for insert with check (auth.uid() = user_id);
+drop policy if exists "Retrait d'une ligne favorite" on favorite_lines;
+create policy "Retrait d'une ligne favorite" on favorite_lines for delete using (auth.uid() = user_id);

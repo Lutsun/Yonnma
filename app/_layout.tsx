@@ -12,6 +12,7 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import React, { useEffect } from 'react';
 import { AuthProvider } from '../store/AuthContext';
+import { TripProvider } from '../store/TripContext';
 
 // Garde le splash screen affiché tant que les polices ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
@@ -38,18 +39,20 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <SafeAreaProvider>
-          <StatusBar style="dark" />
-          <Stack>
-            <Stack.Screen name="index" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="(modals)"
-              options={{ presentation: 'modal', headerShown: false }}
-            />
-          </Stack>
-        </SafeAreaProvider>
+        <TripProvider>
+          <SafeAreaProvider>
+            <StatusBar style="dark" />
+            <Stack>
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="(modals)"
+                options={{ presentation: 'modal', headerShown: false }}
+              />
+            </Stack>
+          </SafeAreaProvider>
+        </TripProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );

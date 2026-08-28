@@ -11,10 +11,10 @@ L'objectif : rendre le transport en commun sénégalais **simple à comprendre e
 
 ## Fonctionnalités
 
-- **Connexion par numéro de téléphone** — un code reçu par SMS, sans mot de passe ni e-mail à retenir
+- **Connexion par numéro de téléphone** — un code reçu par SMS, sans mot de passe ni e-mail à retenir. Vraie authentification Supabase Auth (pas de comptes faits main) : sessions sécurisées, rafraîchissement automatique, et permissions filtrées par utilisateur (Row Level Security via `auth.uid()`)
 - **Écran d'accueil avec carte en direct** — la position de l'utilisateur, les arrêts de bus autour de lui et les lignes qui les desservent
-- **Recherche d'itinéraire** — "Où voulez-vous aller ?" en un seul champ
-- Base de données de lignes et d'arrêts réels de Dakar (BRT, Dakar Dem Dikk, Tata AFTU)
+- **Planificateur d'itinéraire (fonctionnalité principale)** — l'utilisateur indique un point de départ et une destination ; Yonnma calcule le meilleur trajet à travers le réseau réel : lignes à emprunter, correspondances, arrêt où descendre, temps estimé et coût estimé (voir `services/routing.ts`)
+- Base de données de lignes et d'arrêts réels de Dakar (BRT, Dakar Dem Dikk, Tata AFTU) — plusieurs dizaines de lignes et d'arrêts
 
 ## Stack technique
 
@@ -32,23 +32,26 @@ L'objectif : rendre le transport en commun sénégalais **simple à comprendre e
 app/                    Écrans (Expo Router)
   (auth)/                 connexion, code SMS, création de profil
   (tabs)/                  accueil (carte), routes, assistant, favoris, profil
-  (modals)/                détail d'un arrêt/bus
+  (modals)/                détail d'un arrêt/bus, planificateur d'itinéraire
 components/auth/        Composants d'interface réutilisables
 constants/theme.ts       Couleurs, typographies, espacements — le design system
-services/                Accès aux données (auth, transport, client Supabase)
+services/                Accès aux données (auth, transport, client Supabase, planificateur d'itinéraire)
 store/                  État global (session utilisateur)
 types/                  Types TypeScript partagés
 utils/                  Fonctions utilitaires (validation de numéro, ...)
 supabase/
   schema.sql              Schéma de la base (tables + fonctions PostGIS)
   seed.sql                 Données réelles de démarrage (lignes et arrêts de Dakar)
+  migrate_to_auth.sql      Migration ponctuelle (ancienne table `users` faite main -> Supabase Auth)
 ```
 
 ## Base de données
 
-Le schéma (`supabase/schema.sql`) est volontairement simple : six tables (`operators`, `lines`, `stops`, `line_stops`, `users`, `user_trips`) plus une fonction PostGIS, `nearby_stops(lat, lng)`, qui renvoie les arrêts les plus proches d'un point ainsi que les lignes qui les desservent.
+Le schéma (`supabase/schema.sql`) est volontairement simple : sept tables (`operators`, `lines`, `stops`, `line_stops`, `profiles`, `user_trips`, `favorite_lines`) plus des fonctions PostGIS — dont `nearby_stops(lat, lng)` (arrêts les plus proches d'un point) et `get_route_graph()`, qui renvoie tout le réseau (lignes + arrêts dans l'ordre + tarifs) en un seul appel : c'est ce que le planificateur d'itinéraire utilise pour construire son graphe de trajet et calculer le meilleur chemin (algorithme de Dijkstra, `services/routing.ts`).
 
-Les données de démarrage (`supabase/seed.sql`) sont **réelles**, pas inventées : la ligne B1 complète du BRT de Dakar, plusieurs lignes Dakar Dem Dikk et Tata AFTU, avec des coordonnées GPS vérifiées.
+`profiles` ne stocke que les infos propres à Yonnma (nom, ville) — les comptes eux-mêmes sont de vrais comptes **Supabase Auth** (téléphone + code SMS), pas une table maison. Chaque table sensible (`profiles`, `user_trips`, `favorite_lines`) est protégée par des policies Row Level Security basées sur `auth.uid()` : un utilisateur ne peut lire ou modifier que ses propres données.
+
+Les données de démarrage (`supabase/seed.sql`) sont **réelles**, pas inventées : la ligne B1 complète du BRT de Dakar, et une trentaine de lignes Dakar Dem Dikk et Tata AFTU (numéros, parcours et tarifs vérifiés via demdikk.sn, aftu-senegal.org et Moovit), avec des coordonnées GPS.
 
 ## Démarrage
 
@@ -64,7 +67,11 @@ cp .env.example .env
 # (Project Settings > API dans ton projet Supabase)
 ```
 
-Dans l'éditeur SQL de ton projet Supabase, exécute dans l'ordre `supabase/schema.sql` puis `supabase/seed.sql`.
+Configuration Supabase :
+
+1. Si tu reviens d'une ancienne version du projet (table `users` faite main) : exécute d'abord `supabase/migrate_to_auth.sql` une seule fois. Sur un projet Supabase tout neuf, passe directement à l'étape 2.
+2. Dans l'éditeur SQL, exécute dans l'ordre `supabase/schema.sql` puis `supabase/seed.sql`.
+3. Dans le dashboard Supabase : **Authentication > Providers > Phone**, active le provider "Phone". Sans fournisseur SMS payant configuré, ajoute des **Test Phone Numbers** (numéro + code fixe, ex. `+221700000001` / `123456`) pour te connecter et tester gratuitement — l'authentification reste 100 % réelle (vrais comptes, vrais tokens), seuls ces numéros peuvent recevoir un code. Pour envoyer de vrais SMS à de vrais numéros sénégalais, configure un fournisseur SMS (Twilio, Vonage...) dans le même écran.
 
 ```bash
 # Lancer le serveur de développement

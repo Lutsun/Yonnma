@@ -11,6 +11,7 @@ export type Line = {
   code: string;
   name: string;
   color: string | null;
+  fare_fcfa?: number;
 };
 
 export type Stop = {
@@ -28,4 +29,59 @@ export type Trip = {
   destinationLabel: string;
   isSaved: boolean;
   createdAt: string;
+};
+
+// Une ligne (ligne_id, arrêt, séquence...) du réseau complet, renvoyée par
+// la fonction PostGIS `get_route_graph` — utilisée pour construire le graphe
+// du planificateur d'itinéraire (voir services/routing.ts).
+export type RouteGraphRow = {
+  line_id: string;
+  line_code: string;
+  line_name: string;
+  line_color: string | null;
+  fare_fcfa: number;
+  operator_short_name: string;
+  operator_color: string;
+  stop_id: string;
+  stop_name: string;
+  latitude: number;
+  longitude: number;
+  sequence: number;
+};
+
+export type LatLng = { latitude: number; longitude: number };
+
+export type RideSegment = {
+  type: 'ride';
+  lineId: string;
+  lineCode: string;
+  lineName: string;
+  lineColor: string;
+  operatorShortName: string;
+  fareFcfa: number;
+  boardStopId: string;
+  boardStopName: string;
+  alightStopId: string;
+  alightStopName: string;
+  stopsCount: number;
+  minutes: number;
+  path: LatLng[];
+};
+
+export type WalkSegment = {
+  type: 'walk';
+  fromStopId: string;
+  fromStopName: string;
+  toStopId: string;
+  toStopName: string;
+  minutes: number;
+  path: LatLng[];
+};
+
+export type TripSegment = RideSegment | WalkSegment;
+
+export type TripPlan = {
+  totalMinutes: number;
+  totalFareFcfa: number;
+  segments: TripSegment[];
 };

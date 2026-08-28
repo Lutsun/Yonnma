@@ -60,8 +60,8 @@ export default function SavedScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <Text style={styles.title}>Sauvegardés</Text>
-      <Text style={styles.subtitle}>Tes lignes et trajets favoris.</Text>
+      <Text style={styles.title}>Favoris</Text>
+      <Text style={styles.subtitle}>Tes lignes et trajets enregistrés.</Text>
 
       {loading ? (
         <View style={styles.loading}>
@@ -77,70 +77,93 @@ export default function SavedScreen() {
         <EmptyState
           icon="bookmark-outline"
           title="Rien d'enregistré pour l'instant"
-          description="Mets une ligne en favori (★) ou enregistre un trajet depuis l'accueil pour les retrouver ici."
+          description="Mets une ligne en favori (★) depuis Trajets, ou enregistre un itinéraire pour le retrouver ici."
         />
       ) : (
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
           {lines.length > 0 && (
             <>
-              <Text style={styles.sectionTitle}>Lignes favorites</Text>
-              {lines.map((line) => (
-                <TouchableOpacity
-                  key={line.id}
-                  style={styles.row}
-                  activeOpacity={0.7}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/(modals)/bus-details',
-                      params: {
-                        lineId: line.id,
-                        code: line.code,
-                        name: line.name,
-                        color: line.color || line.operator.color || '',
-                      },
-                    })
-                  }
-                >
-                  <View
-                    style={[
-                      styles.lineBadge,
-                      { backgroundColor: line.color || line.operator.color || Colors.yonn },
-                    ]}
-                  >
-                    <Text style={styles.lineBadgeText}>{line.code}</Text>
-                  </View>
-                  <Text style={styles.rowText} numberOfLines={1}>
-                    {line.name}
-                  </Text>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Lignes favorites</Text>
+                <Text style={styles.sectionCount}>{lines.length}</Text>
+              </View>
+              {lines.map((line) => {
+                const color = line.color || line.operator.color || Colors.yonn;
+                const [from, to] = line.name.split('↔').map((s) => s.trim());
+                return (
                   <TouchableOpacity
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    onPress={() => handleUnfavorite(line.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Retirer des favoris"
+                    key={line.id}
+                    style={styles.card}
+                    activeOpacity={0.7}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(modals)/bus-details',
+                        params: { lineId: line.id, code: line.code, name: line.name, color },
+                      })
+                    }
                   >
-                    <Ionicons name="star" size={20} color={Colors.gold} />
+                    <View style={[styles.avatar, { backgroundColor: color }]}>
+                      <Text style={styles.avatarText} numberOfLines={1}>
+                        {line.code.replace('Ligne ', '')}
+                      </Text>
+                    </View>
+
+                    <View style={styles.cardInfo}>
+                      {from && to ? (
+                        <View style={styles.routeRow}>
+                          <Text style={styles.routeText} numberOfLines={1}>
+                            {from}
+                          </Text>
+                          <Ionicons name="arrow-forward" size={12} color={Colors.stoneLight} />
+                          <Text style={styles.routeText} numberOfLines={1}>
+                            {to}
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.routeText} numberOfLines={1}>
+                          {line.name}
+                        </Text>
+                      )}
+                      <Text style={styles.captionText}>{line.operator.name}</Text>
+                    </View>
+
+                    <TouchableOpacity
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      onPress={() => handleUnfavorite(line.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Retirer des favoris"
+                    >
+                      <Ionicons name="star" size={20} color={Colors.gold} />
+                    </TouchableOpacity>
                   </TouchableOpacity>
-                </TouchableOpacity>
-              ))}
+                );
+              })}
               <View style={{ height: Spacing.md }} />
             </>
           )}
 
           {trips.length > 0 && (
             <>
-              <Text style={styles.sectionTitle}>Trajets enregistrés</Text>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Trajets enregistrés</Text>
+                <Text style={styles.sectionCount}>{trips.length}</Text>
+              </View>
               {trips.map((trip) => (
-                <View key={trip.id} style={styles.row}>
-                  <View style={styles.tripIcon}>
-                    <Ionicons name="bookmark" size={16} color={Colors.yonn} />
+                <View key={trip.id} style={styles.card}>
+                  <View style={[styles.avatar, styles.avatarTint]}>
+                    <Ionicons name="git-branch" size={18} color={Colors.yonn} />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.rowText} numberOfLines={1}>
-                      {trip.originLabel}
-                    </Text>
-                    <Text style={styles.rowSubtext} numberOfLines={1}>
-                      → {trip.destinationLabel}
-                    </Text>
+                  <View style={styles.cardInfo}>
+                    <View style={styles.routeRow}>
+                      <Text style={styles.routeText} numberOfLines={1}>
+                        {trip.originLabel}
+                      </Text>
+                      <Ionicons name="arrow-forward" size={12} color={Colors.stoneLight} />
+                      <Text style={styles.routeText} numberOfLines={1}>
+                        {trip.destinationLabel}
+                      </Text>
+                    </View>
+                    <Text style={styles.captionText}>Itinéraire enregistré</Text>
                   </View>
                 </View>
               ))}
@@ -174,22 +197,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.xl,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
   sectionTitle: {
+    flex: 1,
     fontFamily: Fonts.bodySemi,
     fontSize: 13,
     color: Colors.stone,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    marginBottom: Spacing.sm,
   },
-  row: {
+  sectionCount: {
+    fontFamily: Fonts.bodyMedium,
+    fontSize: 12,
+    color: Colors.stoneLight,
+  },
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     backgroundColor: Colors.white,
-    borderRadius: Radii.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    borderRadius: Radii.lg,
+    padding: Spacing.sm,
     marginBottom: Spacing.sm,
     shadowColor: Colors.ma,
     shadowOpacity: 0.06,
@@ -197,34 +229,37 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
-  lineBadge: {
-    borderRadius: Radii.pill,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-  },
-  lineBadgeText: {
-    fontFamily: Fonts.bodySemi,
-    fontSize: 12,
-    color: Colors.white,
-  },
-  tripIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: Radii.pill,
-    backgroundColor: Colors.yonnTint,
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: Radii.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowText: {
-    flex: 1,
-    fontFamily: Fonts.bodyMedium,
+  avatarTint: {
+    backgroundColor: Colors.yonnTint,
+  },
+  avatarText: {
+    fontFamily: Fonts.bodySemi,
+    fontSize: 13,
+    color: Colors.white,
+  },
+  cardInfo: { flex: 1 },
+  routeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  routeText: {
+    flexShrink: 1,
+    fontFamily: Fonts.bodySemi,
     fontSize: 14,
     color: Colors.ma,
   },
-  rowSubtext: {
+  captionText: {
     fontFamily: Fonts.body,
-    fontSize: 13,
+    fontSize: 12,
     color: Colors.stone,
-    marginTop: 1,
+    marginTop: 2,
   },
 });

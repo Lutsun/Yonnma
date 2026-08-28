@@ -8,24 +8,24 @@ import OtpInput from '../../components/auth/OtpInput';
 import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Colors, Fonts, Radii, Spacing } from '../../constants/theme';
 import { sendOtp, verifyOtp } from '../../services/auth';
-import { useAuth } from '../../store/AuthContext';
-import { formatPhoneDisplay } from '../../utils/phone';
+import { getProfile } from '../../services/profile';
+import { formatPhoneDisplay, toE164 } from '../../utils/phone';
 
 const RESEND_COOLDOWN = 30;
 const CODE_LENGTH = 6;
 
 export default function VerifyScreen() {
   const router = useRouter();
-  const { login } = useAuth();
   const { phone } = useLocalSearchParams<{ phone: string }>();
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN);
-  const [devHint, setDevHint] = useState<string | undefined>();
 
   useEffect(() => {
-    sendOtp(phone).then(({ devCode }) => setDevHint(devCode));
+    sendOtp(phone).catch(() => {
+      setError("Impossible d'envoyer le code. Vérifie ta connexion.");
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -39,17 +39,19 @@ export default function VerifyScreen() {
     setError(undefined);
     setLoading(true);
     try {
-      const result = await verifyOtp(phone, value);
-      if (!result.success) {
+      const { session } = await verifyOtp(phone, value);
+      if (!session?.user) {
         setError('Code incorrect ou expiré');
         return;
       }
-      if (result.isNewUser) {
-        router.replace({ pathname: '/(auth)/complete-profile', params: { phone } });
-      } else {
-        login(result.user!);
+      const profile = await getProfile(session.user.id, session.user.phone ?? toE164(phone));
+      if (profile) {
         router.replace('/(tabs)');
+      } else {
+        router.replace({ pathname: '/(auth)/complete-profile', params: { phone } });
       }
+    } catch {
+      setError('Code incorrect ou expiré');
     } finally {
       setLoading(false);
     }
@@ -65,8 +67,11 @@ export default function VerifyScreen() {
     setCode('');
     setError(undefined);
     setCooldown(RESEND_COOLDOWN);
-    const { devCode } = await sendOtp(phone);
-    setDevHint(devCode);
+    try {
+      await sendOtp(phone);
+    } catch {
+      setError("Impossible d'envoyer le code. Vérifie ta connexion.");
+    }
   };
 
   const cooldownLabel = `00:${cooldown.toString().padStart(2, '0')}`;
@@ -91,8 +96,11 @@ export default function VerifyScreen() {
           <Text style={styles.phone}>+221 {formatPhoneDisplay(phone ?? '')}</Text>
         </Text>
 
-        {!!devHint && (
-          <Text style={styles.devHint}>Mode démo — code : {devHint}</Text>
+        {__DEV__ && (
+          <Text style={styles.devHint}>
+            Astuce dev : utilise un numéro de test configuré dans Supabase
+            (Authentication → Providers → Phone) avec son code fixe.
+          </Text>
         )}
 
         <View style={{ height: Spacing.xl }} />
