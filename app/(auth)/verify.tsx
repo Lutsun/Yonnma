@@ -22,12 +22,9 @@ export default function VerifyScreen() {
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN);
 
-  useEffect(() => {
-    sendOtp(phone).catch(() => {
-      setError("Impossible d'envoyer le code. Vérifie ta connexion.");
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Le code a déjà été envoyé par l'écran de connexion juste avant
+  // d'arriver ici — on ne le renvoie pas une deuxième fois au montage
+  // (Supabase limite le débit d'envoi d'OTP par numéro).
 
   useEffect(() => {
     if (cooldown <= 0) return;
