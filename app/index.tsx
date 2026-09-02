@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import Wordmark from '../components/brand/Wordmark';
 import { useAuth } from '../store/AuthContext';
-import { Colors } from '../constants/theme';
+import { Palette } from '../constants/theme';
+import { useColors } from '../store/ThemeContext';
 
 // Écran d'ouverture : présente la marque sur fond vert pendant un court
 // instant (comme Yango, Yassir...) avant d'atterrir sur la connexion ou,
@@ -13,6 +14,8 @@ import { Colors } from '../constants/theme';
 const PRESENTATION_DURATION = 1400;
 
 export default function Index() {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { isLoggedIn, isRestoring, needsProfile, session } = useAuth();
   const progress = useRef(new Animated.Value(0)).current;
@@ -65,10 +68,11 @@ export default function Index() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.yonn,
+    backgroundColor: c.yonn,
     alignItems: 'center',
     justifyContent: 'center',
   },

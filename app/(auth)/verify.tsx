@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -6,7 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import OtpInput from '../../components/auth/OtpInput';
 import PrimaryButton from '../../components/ui/PrimaryButton';
-import { Colors, Fonts, Radii, Spacing } from '../../constants/theme';
+import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 import { sendOtp, verifyOtp } from '../../services/auth';
 import { getProfile } from '../../services/profile';
 import { formatPhoneDisplay, toE164 } from '../../utils/phone';
@@ -15,6 +16,8 @@ const RESEND_COOLDOWN = 30;
 const CODE_LENGTH = 6;
 
 export default function VerifyScreen() {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { phone } = useLocalSearchParams<{ phone: string }>();
   const [code, setCode] = useState('');
@@ -82,7 +85,7 @@ export default function VerifyScreen() {
           accessibilityRole="button"
           accessibilityLabel="Retour"
         >
-          <Ionicons name="chevron-back" size={20} color={Colors.ma} />
+          <Ionicons name="chevron-back" size={20} color={c.ink} />
         </TouchableOpacity>
       </View>
 
@@ -133,14 +136,15 @@ export default function VerifyScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.cream },
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
+  safe: { flex: 1, backgroundColor: c.canvas },
   header: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md },
   back: {
     width: 40,
     height: 40,
     borderRadius: Radii.pill,
-    backgroundColor: Colors.fill,
+    backgroundColor: c.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -148,37 +152,37 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: Fonts.display,
     fontSize: 28,
-    color: Colors.ma,
+    color: c.ink,
   },
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: 14,
-    color: Colors.stone,
+    color: c.inkMuted,
     marginTop: 6,
     lineHeight: 20,
   },
   phone: {
     fontFamily: Fonts.bodySemi,
-    color: Colors.ma,
+    color: c.ink,
   },
   devHint: {
     fontFamily: Fonts.bodyMedium,
     fontSize: 13,
-    color: Colors.yonn,
+    color: c.yonn,
     marginTop: Spacing.sm,
   },
   resend: { alignSelf: 'center', marginTop: Spacing.lg, padding: Spacing.xs },
   resendText: {
     fontFamily: Fonts.body,
     fontSize: 14,
-    color: Colors.ma,
+    color: c.ink,
   },
   resendMuted: {
     fontFamily: Fonts.bodyMedium,
-    color: Colors.stone,
+    color: c.inkMuted,
   },
   resendLink: {
     fontFamily: Fonts.bodySemi,
-    color: Colors.yonn,
+    color: c.yonn,
   },
 });

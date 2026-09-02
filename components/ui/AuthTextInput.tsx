@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   TextInput,
@@ -8,7 +8,8 @@ import {
   TextInputProps,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Fonts, Radii, Spacing } from '../../constants/theme';
+import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 
 type Props = TextInputProps & {
   label: string;
@@ -25,6 +26,8 @@ export default function AuthTextInput({
   secureTextEntry,
   ...rest
 }: Props) {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(!!secureToggle);
 
@@ -41,12 +44,12 @@ export default function AuthTextInput({
         <Ionicons
           name={icon}
           size={18}
-          color={focused ? Colors.yonn : Colors.stone}
+          color={focused ? c.yonn : c.inkMuted}
         />
         <TextInput
           {...rest}
           style={styles.input}
-          placeholderTextColor={Colors.stoneLight}
+          placeholderTextColor={c.line}
           onFocus={(e) => {
             setFocused(true);
             rest.onFocus?.(e);
@@ -68,7 +71,7 @@ export default function AuthTextInput({
             <Ionicons
               name={hidden ? 'eye-off-outline' : 'eye-outline'}
               size={18}
-              color={Colors.stone}
+              color={c.inkMuted}
             />
           </TouchableOpacity>
         )}
@@ -78,40 +81,41 @@ export default function AuthTextInput({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
   wrap: { marginBottom: Spacing.md },
   label: {
     fontFamily: Fonts.bodyMedium,
     fontSize: 13,
-    color: Colors.ma,
+    color: c.ink,
     marginBottom: 6,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: Colors.fill,
+    backgroundColor: c.fill,
     borderWidth: 1.5,
-    borderColor: Colors.stoneLight,
+    borderColor: c.line,
     borderRadius: Radii.md,
     paddingHorizontal: Spacing.md,
     height: 56,
   },
   inputRowFocused: {
-    borderColor: Colors.ma,
+    borderColor: c.ink,
   },
-  inputRowError: { borderColor: Colors.danger },
+  inputRowError: { borderColor: c.danger },
   input: {
     flex: 1,
     fontFamily: Fonts.body,
     fontSize: 16,
-    color: Colors.ma,
+    color: c.ink,
     paddingVertical: 0,
   },
   error: {
     fontFamily: Fonts.body,
     fontSize: 12,
-    color: Colors.danger,
+    color: c.danger,
     marginTop: 4,
   },
 });

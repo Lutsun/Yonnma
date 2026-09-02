@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,11 +13,14 @@ import { useRouter } from 'expo-router';
 
 import Wordmark from '../../components/brand/Wordmark';
 import PrimaryButton from '../../components/ui/PrimaryButton';
-import { Colors, Fonts, Radii, Spacing } from '../../constants/theme';
+import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 import { isValidSenegalPhone } from '../../utils/phone';
 import { sendOtp } from '../../services/auth';
 
 export default function LoginScreen() {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | undefined>();
@@ -71,7 +74,7 @@ export default function LoginScreen() {
                 <TextInput
                   style={styles.fieldInput}
                   placeholder="77 123 45 67"
-                  placeholderTextColor={Colors.stone}
+                  placeholderTextColor={c.inkMuted}
                   keyboardType="phone-pad"
                   value={phone}
                   onChangeText={(t) => {
@@ -106,8 +109,9 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.cream },
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
+  safe: { flex: 1, backgroundColor: c.canvas },
   scroll: {
     flexGrow: 1,
     justifyContent: 'space-between',
@@ -118,12 +122,12 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: Fonts.display,
     fontSize: 28,
-    color: Colors.ma,
+    color: c.ink,
   },
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: 14,
-    color: Colors.stone,
+    color: c.inkMuted,
     marginTop: 6,
   },
   phoneRow: {
@@ -135,15 +139,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     borderRadius: Radii.md,
     borderWidth: 1.5,
-    borderColor: Colors.stoneLight,
-    backgroundColor: Colors.fill,
+    borderColor: c.line,
+    backgroundColor: c.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
   codeText: {
     fontFamily: Fonts.bodyMedium,
     fontSize: 15,
-    color: Colors.ma,
+    color: c.ink,
   },
   field: {
     flex: 1,
@@ -151,32 +155,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     borderRadius: Radii.md,
     borderWidth: 1.5,
-    borderColor: Colors.stoneLight,
-    backgroundColor: Colors.fill,
+    borderColor: c.line,
+    backgroundColor: c.fill,
     justifyContent: 'center',
   },
-  fieldError: { borderColor: Colors.danger },
+  fieldError: { borderColor: c.danger },
   fieldInput: {
     fontFamily: Fonts.body,
     fontSize: 16,
-    color: Colors.ma,
+    color: c.ink,
     padding: 0,
   },
   error: {
     fontFamily: Fonts.body,
     fontSize: 12,
-    color: Colors.danger,
+    color: c.danger,
     marginTop: 6,
   },
   consent: {
     fontFamily: Fonts.body,
     fontSize: 12,
     lineHeight: 18,
-    color: Colors.stone,
+    color: c.inkMuted,
     marginTop: Spacing.md,
   },
   link: {
     fontFamily: Fonts.bodyMedium,
-    color: Colors.yonn,
+    color: c.yonn,
   },
 });

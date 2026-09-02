@@ -1,33 +1,77 @@
 // constants/theme.ts
 //
-// Jetons de design Yonnma — vert de la marque, style simple et arrondi,
-// inspiré des apps mobiles ouest-africaines grand public (Wave, Yango) :
-// beaucoup de blanc, une seule couleur d'accent, des formes douces.
+// Système de design Yonnma, en deux palettes (claire et sombre).
+//
+// Principes : une seule couleur d'accent utilisée avec parcimonie, une
+// échelle de gris à trois niveaux pour toute la hiérarchie du texte, et des
+// cartes délimitées par de fines bordures plutôt que par des ombres.
+//
+// Les écrans ne lisent jamais ces palettes directement : ils passent par
+// `useColors()` (voir store/ThemeContext.tsx) pour suivre le mode choisi.
 
-export const Colors = {
-  // Marque — vert clair et vif façon Spotify.
-  yonn: '#1DB954', // vert principal, départ / mouvement
-  yonnDark: '#127334', // pressed state
-  yonnDeep: '#0C4E23', // texte / chiffres sur fond clair (contraste fort)
-  yonnTint: '#E5FBED', // vert très pâle — fonds de puces, focus
+export type Palette = {
+  yonn: string;
+  yonnDark: string;
+  yonnDeep: string;
+  yonnTint: string;
 
-  ma: '#201E1D', // texte d'ancrage
-  gold: '#F2B705', // étoile favori uniquement
+  ink: string;
+  inkMuted: string;
+  inkFaint: string;
 
-  // Neutres
-  cream: '#FFFFFF', // fond des écrans
-  white: '#FFFFFF',
-  fill: '#F3F4F2', // fond des champs de saisie
-  stone: '#8A8680', // texte secondaire
-  stoneLight: '#E4E2DE', // bordures, placeholders
+  canvas: string;
+  surface: string;
+  line: string;
+  fill: string;
 
-  // États
-  danger: '#D14343',
+  danger: string;
+  dangerTint: string;
+  gold: string;
 };
 
-// Polices d'affichage (Sora) et de texte courant (Inter).
-// À charger via @expo-google-fonts/sora et @expo-google-fonts/inter,
-// voir les instructions livrées avec ces fichiers.
+export const lightColors: Palette = {
+  yonn: '#12B76A',
+  yonnDark: '#027A48',
+  yonnDeep: '#05603A',
+  yonnTint: '#ECFDF3',
+
+  ink: '#101828',
+  inkMuted: '#475467',
+  inkFaint: '#98A2B3',
+
+  canvas: '#F9FAFB',
+  surface: '#FFFFFF',
+  line: '#EAECF0',
+  fill: '#F2F4F7',
+
+  danger: '#D92D20',
+  dangerTint: '#FEF3F2',
+  gold: '#F79009',
+};
+
+export const darkColors: Palette = {
+  // Vert éclairci : sur fond sombre, le vert clair reste lisible là où le
+  // vert d'origine deviendrait terne.
+  yonn: '#32D583',
+  yonnDark: '#6CE9A6',
+  yonnDeep: '#A6F4C5',
+  yonnTint: '#0C2A1D',
+
+  ink: '#F2F4F7',
+  inkMuted: '#B4BCC8',
+  inkFaint: '#727C8A',
+
+  canvas: '#0C1017',
+  surface: '#161C26',
+  line: '#252D3A',
+  fill: '#1E2531',
+
+  danger: '#F97066',
+  dangerTint: '#2A1614',
+  gold: '#FDB022',
+};
+
+// Sora pour les titres et les chiffres, Inter pour le texte courant.
 export const Fonts = {
   display: 'Sora_700Bold',
   displaySemi: 'Sora_600SemiBold',
@@ -36,26 +80,41 @@ export const Fonts = {
   bodySemi: 'Inter_600SemiBold',
 };
 
-export const Spacing = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  xxl: 48,
-};
+export const Spacing = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 };
 
-// Formes douces et arrondies.
-export const Radii = {
-  sm: 10,
-  md: 16,
-  lg: 22,
-  xl: 28,
-  pill: 999,
-};
+export const Radii = { sm: 8, md: 12, lg: 16, xl: 24, pill: 999 };
 
-// Hauteur de la barre de navigation flottante (voir app/(tabs)/_layout.tsx)
-// + son décalage par rapport au bas de l'écran. Les écrans l'utilisent pour
-// laisser assez de place en bas de leur contenu.
-export const TAB_BAR_HEIGHT = 76;
+// Ombres — rares et douces, réservées à ce qui flotte réellement au-dessus
+// du contenu. En mode sombre une ombre ne se voit pas : on la remplace par
+// une bordure, qui joue le même rôle de détourage.
+export function makeElevation(c: Palette, isDark: boolean) {
+  const floating = isDark
+    ? { borderWidth: 1, borderColor: c.line }
+    : {
+        shadowColor: '#101828',
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 6,
+      };
+
+  const control = isDark
+    ? { borderWidth: 1, borderColor: c.line }
+    : {
+        shadowColor: '#101828',
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 3 },
+        elevation: 4,
+      };
+
+  return {
+    card: { borderWidth: 1, borderColor: c.line },
+    floating,
+    control,
+  } as const;
+}
+
+// Barre de navigation flottante (voir components/navigation/CustomTabBar.tsx).
+export const TAB_BAR_HEIGHT = 68;
 export const TAB_BAR_BOTTOM_MARGIN = Spacing.sm;

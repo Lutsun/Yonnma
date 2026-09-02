@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   TouchableOpacity,
   Text,
@@ -6,22 +6,33 @@ import {
   ActivityIndicator,
   GestureResponderEvent,
 } from 'react-native';
-import { Colors, Fonts, Radii } from '../../constants/theme';
+import { Fonts, Radii, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 
 export default function PrimaryButton({
   label,
   onPress,
   loading,
   disabled,
+  variant = 'primary',
 }: {
   label: string;
   onPress: (e: GestureResponderEvent) => void;
   loading?: boolean;
   disabled?: boolean;
+  variant?: 'primary' | 'secondary';
 }) {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
+  const isSecondary = variant === 'secondary';
+
   return (
     <TouchableOpacity
-      style={[styles.button, (disabled || loading) && styles.buttonDisabled]}
+      style={[
+        styles.button,
+        isSecondary && styles.buttonSecondary,
+        (disabled || loading) && styles.buttonDisabled,
+      ]}
       onPress={onPress}
       disabled={disabled || loading}
       activeOpacity={0.85}
@@ -29,32 +40,29 @@ export default function PrimaryButton({
       accessibilityState={{ disabled: disabled || loading }}
     >
       {loading ? (
-        <ActivityIndicator color={Colors.white} />
+        <ActivityIndicator color={isSecondary ? c.ink : c.canvas} />
       ) : (
-        <Text style={styles.label}>{label}</Text>
+        <Text style={[styles.label, isSecondary && styles.labelSecondary]}>{label}</Text>
       )}
     </TouchableOpacity>
   );
 }
 
-const styles = StyleSheet.create({
-  button: {
-    height: 56,
-    borderRadius: Radii.pill,
-    backgroundColor: Colors.yonn,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.yonn,
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
-  },
-  buttonDisabled: { opacity: 0.5, shadowOpacity: 0 },
-  label: {
-    fontFamily: Fonts.display,
-    fontSize: 16,
-    color: Colors.white,
-    letterSpacing: 0.2,
-  },
-});
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
+    button: {
+      height: 52,
+      borderRadius: Radii.md,
+      backgroundColor: c.yonn,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    buttonSecondary: {
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.line,
+    },
+    buttonDisabled: { opacity: 0.4 },
+    label: { fontFamily: Fonts.bodySemi, fontSize: 16, color: c.canvas },
+    labelSecondary: { color: c.ink },
+  });

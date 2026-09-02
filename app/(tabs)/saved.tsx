@@ -1,172 +1,214 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useCallback, useState, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import EmptyState from '../../components/ui/EmptyState';
 import {
-  Colors,
   Fonts,
   Radii,
   Spacing,
   TAB_BAR_HEIGHT,
   TAB_BAR_BOTTOM_MARGIN,
+  Palette,
 } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 import { useAuth } from '../../store/AuthContext';
+import { useTrip } from '../../store/TripContext';
 import { getSavedTrips } from '../../services/trips';
 import { getFavoriteLines, removeFavoriteLine, FavoriteLine } from '../../services/favorites';
+import { getRouteGraph, searchStops } from '../../services/transit';
+import { buildRouteGraph, planTripOptions, RouteGraph } from '../../services/routing';
 import { Trip } from '../../types/transit';
 
+let cachedGraph: RouteGraph | null = null;
+
 export default function SavedScreen() {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { user } = useAuth();
+  const { setPendingTrip } = useTrip();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [lines, setLines] = useState<FavoriteLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [errored, setErrored] = useState(false);
+  const [replayingId, setReplayingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
+  // Recharge à chaque affichage : un trajet enregistré depuis l'itinéraire
+  // doit apparaître ici immédiatement.
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) return;
+      let cancelled = false;
 
-    Promise.all([getSavedTrips(user.id), getFavoriteLines(user.id)])
-      .then(([tripsData, linesData]) => {
-        if (cancelled) return;
-        setTrips(tripsData);
-        setLines(linesData);
-      })
-      .catch(() => {
-        if (!cancelled) setErrored(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      Promise.all([getSavedTrips(user.id), getFavoriteLines(user.id)])
+        .then(([t, l]) => {
+          if (cancelled) return;
+          setTrips(t);
+          setLines(l);
+          setErrored(false);
+        })
+        .catch(() => !cancelled && setErrored(true))
+        .finally(() => !cancelled && setLoading(false));
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+      return () => {
+        cancelled = true;
+      };
+    }, [user])
+  );
 
-  const handleUnfavorite = (lineId: string) => {
+  const unfavorite = (lineId: string) => {
     if (!user) return;
     setLines((prev) => prev.filter((l) => l.id !== lineId));
-    removeFavoriteLine(user.id, lineId).catch(() => {
-      // Échec silencieux : au pire la ligne réapparaîtra à la prochaine visite.
-    });
+    removeFavoriteLine(user.id, lineId).catch(() => {});
+  };
+
+  // Rejoue un trajet enregistré : on retrouve les deux arrêts par leur nom,
+  // on recalcule, et on renvoie l'utilisateur sur l'écran de choix.
+  const replay = async (trip: Trip) => {
+    setReplayingId(trip.id);
+    try {
+      const [originMatches, destinationMatches] = await Promise.all([
+        searchStops(trip.originLabel),
+        searchStops(trip.destinationLabel),
+      ]);
+      const origin = originMatches.find((s) => s.name === trip.originLabel) ?? originMatches[0];
+      const destination =
+        destinationMatches.find((s) => s.name === trip.destinationLabel) ?? destinationMatches[0];
+      if (!origin || !destination) return;
+
+      if (!cachedGraph) cachedGraph = buildRouteGraph(await getRouteGraph());
+      const options = planTripOptions(cachedGraph, origin.id, destination.id);
+      if (options.length === 0) return;
+
+      setPendingTrip({ origin, destination, options });
+      router.push('/(modals)/choose-trip');
+    } finally {
+      setReplayingId(null);
+    }
   };
 
   const isEmpty = trips.length === 0 && lines.length === 0;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <Text style={styles.title}>Favoris</Text>
-      <Text style={styles.subtitle}>Tes lignes et trajets enregistrés.</Text>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.head}>
+        <Text style={styles.title}>Favoris</Text>
+        <Text style={styles.subtitle}>Tes trajets et tes lignes enregistrés</Text>
+      </View>
 
       {loading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={Colors.yonn} />
+        <View style={styles.center}>
+          <ActivityIndicator color={c.yonn} />
         </View>
       ) : errored ? (
         <EmptyState
-          icon="warning"
+          icon="cloud-offline-outline"
           title="Impossible de charger tes favoris"
           description="Vérifie ta connexion et réessaie dans un instant."
         />
       ) : isEmpty ? (
         <EmptyState
           icon="bookmark-outline"
-          title="Rien d'enregistré pour l'instant"
-          description="Mets une ligne en favori (★) depuis Trajets, ou enregistre un itinéraire pour le retrouver ici."
+          title="Rien d'enregistré"
+          description="Enregistre un itinéraire avant de partir, ou mets une ligne en favori depuis l'onglet Lignes."
         />
       ) : (
         <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {lines.length > 0 && (
+          {trips.length > 0 && (
             <>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Lignes favorites</Text>
-                <Text style={styles.sectionCount}>{lines.length}</Text>
-              </View>
-              {lines.map((line) => {
-                const color = line.color || line.operator.color || Colors.yonn;
-                const [from, to] = line.name.split('↔').map((s) => s.trim());
-                return (
-                  <TouchableOpacity
-                    key={line.id}
-                    style={styles.card}
-                    activeOpacity={0.7}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/(modals)/bus-details',
-                        params: { lineId: line.id, code: line.code, name: line.name, color },
-                      })
-                    }
-                  >
-                    <View style={[styles.avatar, { backgroundColor: color }]}>
-                      <Text style={styles.avatarText} numberOfLines={1}>
-                        {line.code.replace('Ligne ', '')}
-                      </Text>
-                    </View>
-
-                    <View style={styles.cardInfo}>
-                      {from && to ? (
-                        <View style={styles.routeRow}>
-                          <Text style={styles.routeText} numberOfLines={1}>
-                            {from}
-                          </Text>
-                          <Ionicons name="arrow-forward" size={12} color={Colors.stoneLight} />
-                          <Text style={styles.routeText} numberOfLines={1}>
-                            {to}
-                          </Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.routeText} numberOfLines={1}>
-                          {line.name}
-                        </Text>
-                      )}
-                      <Text style={styles.captionText}>{line.operator.name}</Text>
-                    </View>
-
+              <Text style={styles.sectionLabel}>Trajets</Text>
+              <View style={styles.card}>
+                {trips.map((trip, i) => (
+                  <View key={trip.id}>
+                    {i > 0 && <View style={styles.separator} />}
                     <TouchableOpacity
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      onPress={() => handleUnfavorite(line.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel="Retirer des favoris"
+                      style={styles.row}
+                      activeOpacity={0.7}
+                      onPress={() => replay(trip)}
+                      disabled={replayingId === trip.id}
                     >
-                      <Ionicons name="star" size={20} color={Colors.gold} />
+                      <View style={styles.tripIcon}>
+                        {replayingId === trip.id ? (
+                          <ActivityIndicator size="small" color={c.yonn} />
+                        ) : (
+                          <Ionicons name="git-branch-outline" size={18} color={c.yonn} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>
+                          {trip.originLabel} → {trip.destinationLabel}
+                        </Text>
+                        <Text style={styles.rowMeta}>Appuie pour relancer ce trajet</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={17} color={c.inkFaint} />
                     </TouchableOpacity>
-                  </TouchableOpacity>
-                );
-              })}
-              <View style={{ height: Spacing.md }} />
+                  </View>
+                ))}
+              </View>
             </>
           )}
 
-          {trips.length > 0 && (
+          {lines.length > 0 && (
             <>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Trajets enregistrés</Text>
-                <Text style={styles.sectionCount}>{trips.length}</Text>
-              </View>
-              {trips.map((trip) => (
-                <View key={trip.id} style={styles.card}>
-                  <View style={[styles.avatar, styles.avatarTint]}>
-                    <Ionicons name="git-branch" size={18} color={Colors.yonn} />
-                  </View>
-                  <View style={styles.cardInfo}>
-                    <View style={styles.routeRow}>
-                      <Text style={styles.routeText} numberOfLines={1}>
-                        {trip.originLabel}
-                      </Text>
-                      <Ionicons name="arrow-forward" size={12} color={Colors.stoneLight} />
-                      <Text style={styles.routeText} numberOfLines={1}>
-                        {trip.destinationLabel}
-                      </Text>
+              <Text style={[styles.sectionLabel, trips.length > 0 && { marginTop: Spacing.lg }]}>
+                Lignes
+              </Text>
+              <View style={styles.card}>
+                {lines.map((line, i) => {
+                  const color = line.color || line.operator.color || c.yonn;
+                  const [from, to] = line.name.split('↔').map((s) => s.trim());
+                  return (
+                    <View key={line.id}>
+                      {i > 0 && <View style={styles.separator} />}
+                      <TouchableOpacity
+                        style={styles.row}
+                        activeOpacity={0.7}
+                        onPress={() =>
+                          router.push({
+                            pathname: '/(modals)/bus-details',
+                            params: {
+                              lineId: line.id,
+                              code: line.code,
+                              name: line.name,
+                              color,
+                            },
+                          })
+                        }
+                      >
+                        <View style={[styles.badge, { backgroundColor: color }]}>
+                          <Text style={styles.badgeText} numberOfLines={1}>
+                            {line.code.replace('Ligne ', '')}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>
+                            {from && to ? `${from} → ${to}` : line.name}
+                          </Text>
+                          <Text style={styles.rowMeta}>{line.operator.name}</Text>
+                        </View>
+                        <TouchableOpacity
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          onPress={() => unfavorite(line.id)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Retirer des favoris"
+                        >
+                          <Ionicons name="star" size={19} color={c.gold} />
+                        </TouchableOpacity>
+                      </TouchableOpacity>
                     </View>
-                    <Text style={styles.captionText}>Itinéraire enregistré</Text>
-                  </View>
-                </View>
-              ))}
+                  );
+                })}
+              </View>
             </>
           )}
         </ScrollView>
@@ -175,91 +217,59 @@ export default function SavedScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.cream },
-  title: {
-    fontFamily: Fonts.display,
-    fontSize: 26,
-    color: Colors.ma,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-  },
-  subtitle: {
-    fontFamily: Fonts.body,
-    fontSize: 14,
-    color: Colors.stone,
-    paddingHorizontal: Spacing.lg,
-    marginTop: 4,
-    marginBottom: Spacing.md,
-  },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
+  safe: { flex: 1, backgroundColor: c.canvas },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  head: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: Spacing.md },
+  title: { fontFamily: Fonts.display, fontSize: 28, color: c.ink },
+  subtitle: { fontFamily: Fonts.body, fontSize: 14, color: c.inkMuted, marginTop: 2 },
+
   list: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.xl,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  sectionTitle: {
-    flex: 1,
+  sectionLabel: {
     fontFamily: Fonts.bodySemi,
-    fontSize: 13,
-    color: Colors.stone,
+    fontSize: 11,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  sectionCount: {
-    fontFamily: Fonts.bodyMedium,
-    fontSize: 12,
-    color: Colors.stoneLight,
+    color: c.inkFaint,
+    marginBottom: Spacing.sm,
   },
   card: {
+    backgroundColor: c.surface,
+    borderRadius: Radii.lg,
+    borderWidth: 1,
+    borderColor: c.line,
+    overflow: 'hidden',
+  },
+  separator: { height: 1, backgroundColor: c.line, marginLeft: 48 + Spacing.md },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Colors.white,
-    borderRadius: Radii.lg,
-    padding: Spacing.sm,
-    marginBottom: Spacing.sm,
-    shadowColor: Colors.ma,
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
   },
-  avatar: {
-    width: 44,
-    height: 44,
+  tripIcon: {
+    width: 40,
+    height: 40,
     borderRadius: Radii.md,
+    backgroundColor: c.yonnTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarTint: {
-    backgroundColor: Colors.yonnTint,
-  },
-  avatarText: {
-    fontFamily: Fonts.bodySemi,
-    fontSize: 13,
-    color: Colors.white,
-  },
-  cardInfo: { flex: 1 },
-  routeRow: {
-    flexDirection: 'row',
+  badge: {
+    minWidth: 48,
+    height: 40,
+    borderRadius: Radii.md,
+    paddingHorizontal: Spacing.sm,
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
   },
-  routeText: {
-    flexShrink: 1,
-    fontFamily: Fonts.bodySemi,
-    fontSize: 14,
-    color: Colors.ma,
-  },
-  captionText: {
-    fontFamily: Fonts.body,
-    fontSize: 12,
-    color: Colors.stone,
-    marginTop: 2,
-  },
+  badgeText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: c.surface },
+  rowTitle: { fontFamily: Fonts.bodySemi, fontSize: 15, color: c.ink },
+  rowMeta: { fontFamily: Fonts.body, fontSize: 12.5, color: c.inkFaint, marginTop: 2 },
 });

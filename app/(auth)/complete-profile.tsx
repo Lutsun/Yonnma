@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,8 @@ import { Session } from '@supabase/supabase-js';
 
 import AuthTextInput from '../../components/ui/AuthTextInput';
 import PrimaryButton from '../../components/ui/PrimaryButton';
-import { Colors, Fonts, Spacing } from '../../constants/theme';
+import { Fonts, Spacing, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 import { supabase } from '../../services/supabase';
 import { createProfile } from '../../services/profile';
 import { useAuth } from '../../store/AuthContext';
@@ -27,6 +28,8 @@ function initialsOf(name: string): string {
 }
 
 export default function CompleteProfileScreen() {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { refreshProfile } = useAuth();
   const { phone } = useLocalSearchParams<{ phone: string }>();
@@ -87,7 +90,7 @@ export default function CompleteProfileScreen() {
               {initials ? (
                 <Text style={styles.avatarText}>{initials}</Text>
               ) : (
-                <Ionicons name="person-outline" size={28} color={Colors.stone} />
+                <Ionicons name="person-outline" size={28} color={c.inkMuted} />
               )}
             </View>
           </View>
@@ -134,21 +137,22 @@ export default function CompleteProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.cream },
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
+  safe: { flex: 1, backgroundColor: c.canvas },
   scroll: { flexGrow: 1, paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xl },
   title: {
     fontFamily: Fonts.display,
     fontSize: 28,
-    color: Colors.ma,
+    color: c.ink,
   },
   titleYonn: {
-    color: Colors.yonn,
+    color: c.yonn,
   },
   subtitle: {
     fontFamily: Fonts.body,
     fontSize: 14,
-    color: Colors.stone,
+    color: c.inkMuted,
     marginTop: 6,
   },
   avatarWrap: {
@@ -160,20 +164,20 @@ const styles = StyleSheet.create({
     height: 88,
     borderRadius: 44,
     borderWidth: 1.5,
-    borderColor: Colors.stoneLight,
+    borderColor: c.line,
     borderStyle: 'dashed',
-    backgroundColor: Colors.fill,
+    backgroundColor: c.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarFilled: {
     borderStyle: 'solid',
-    borderColor: Colors.yonn,
-    backgroundColor: Colors.yonnTint,
+    borderColor: c.yonn,
+    backgroundColor: c.yonnTint,
   },
   avatarText: {
     fontFamily: Fonts.display,
     fontSize: 28,
-    color: Colors.yonn,
+    color: c.yonn,
   },
 });

@@ -1,6 +1,7 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { View, TextInput, Text, StyleSheet, Pressable } from 'react-native';
-import { Colors, Fonts, Radii } from '../../constants/theme';
+import { Fonts, Radii, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 
 export default function OtpInput({
   length = 6,
@@ -13,6 +14,8 @@ export default function OtpInput({
   onChange: (value: string) => void;
   error?: string;
 }) {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const inputRef = useRef<TextInput>(null);
   const digits = Array.from({ length }, (_, i) => value[i] ?? '');
   const activeIndex = Math.min(value.length, length - 1);
@@ -49,7 +52,8 @@ export default function OtpInput({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
   wrap: { position: 'relative' },
   row: {
     flexDirection: 'row',
@@ -61,17 +65,17 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: Radii.md,
     borderWidth: 1.5,
-    borderColor: Colors.yonn,
+    borderColor: c.yonn,
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  boxActive: { borderColor: Colors.ma },
-  boxError: { borderColor: Colors.danger },
+  boxActive: { borderColor: c.ink },
+  boxError: { borderColor: c.danger },
   digit: {
     fontFamily: Fonts.display,
     fontSize: 22,
-    color: Colors.yonnDeep,
+    color: c.yonnDeep,
   },
   hiddenInput: {
     position: 'absolute',
@@ -84,7 +88,7 @@ const styles = StyleSheet.create({
   error: {
     fontFamily: Fonts.body,
     fontSize: 12,
-    color: Colors.danger,
+    color: c.danger,
     marginTop: 8,
     textAlign: 'center',
   },

@@ -5,13 +5,9 @@ import CustomTabBar from '../../components/navigation/CustomTabBar';
 
 export default function TabsLayout() {
   return (
-    <Tabs
-      tabBar={(props) => <CustomTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
-    >
-      <Tabs.Screen name="index" options={{ title: 'Accueil' }} />
-      <Tabs.Screen name="routes" options={{ title: 'Trajets' }} />
-      <Tabs.Screen name="assistant" options={{ title: 'Assistant' }} />
+    <Tabs tabBar={(props) => <CustomTabBar {...props} />} screenOptions={{ headerShown: false }}>
+      <Tabs.Screen name="index" options={{ title: 'Carte' }} />
+      <Tabs.Screen name="routes" options={{ title: 'Lignes' }} />
       <Tabs.Screen name="saved" options={{ title: 'Favoris' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profil' }} />
     </Tabs>

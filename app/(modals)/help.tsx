@@ -1,58 +1,57 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 
-import {
-  Colors,
-  Fonts,
-  Radii,
-  Spacing,
-  TAB_BAR_HEIGHT,
-  TAB_BAR_BOTTOM_MARGIN,
-} from '../../constants/theme';
+import ScreenHeader from '../../components/ui/ScreenHeader';
+import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 
-// Pas encore d'assistant conversationnel (IA) — en attendant, une aide
-// simple et honnête plutôt qu'un chat qui ne répondrait à rien.
+// Pas d'assistant conversationnel : une aide claire et honnête plutôt qu'un
+// chat qui ne répondrait à rien.
 const QUESTIONS: { question: string; answer: string }[] = [
   {
-    question: 'Comment trouver un arrêt de bus près de moi ?',
+    question: 'Comment trouver un trajet ?',
     answer:
-      "Sur l'écran d'accueil, active ta position : les arrêts autour de toi s'affichent directement sur la carte. Appuie sur un arrêt pour voir les lignes qui le desservent.",
+      'Sur la carte, appuie sur « Où allez-vous ? ». Ton point de départ est déjà rempli avec l’arrêt le plus proche de toi : il ne te reste qu’à indiquer ta destination.',
   },
   {
-    question: 'Comment chercher un trajet ?',
+    question: 'Que veut dire « Recommandé » ?',
     answer:
-      "Sur l'écran d'accueil, appuie sur \"Où voulez-vous aller ?\" et indique ta destination.",
+      'C’est le trajet le plus rapide parmi ceux que Yonnma a trouvés. Tu peux toujours choisir l’autre option si elle t’arrange mieux.',
   },
   {
-    question: 'Quels transports Yonnma couvre-t-il ?',
-    answer: 'Le BRT, Dakar Dem Dikk et Tata AFTU pour le moment, avec de vraies lignes et arrêts.',
+    question: 'Les prix affichés sont-ils exacts ?',
+    answer:
+      'Ce sont les tarifs officiels de chaque réseau (BRT, Dakar Dem Dikk, Tata AFTU). Le total additionne le prix de chaque bus emprunté.',
   },
   {
-    question: "Je n'ai pas reçu mon code de connexion, que faire ?",
+    question: 'Pourquoi mon point n’est pas au bon endroit ?',
     answer:
-      "Attends 30 secondes puis appuie sur \"Renvoyer\" sur l'écran de vérification. Vérifie aussi que ton numéro est correct.",
+      'Vérifie que la position précise est activée pour Yonnma dans les Réglages de ton téléphone. En position approximative, iOS ne donne qu’une zone de plusieurs kilomètres.',
+  },
+  {
+    question: 'Comment retrouver un trajet plus tard ?',
+    answer:
+      'Avant de partir, appuie sur l’icône marque-page à côté de « Démarrer le trajet ». Tu le retrouveras dans l’onglet Favoris, et un appui suffira pour le relancer.',
+  },
+  {
+    question: 'Je n’ai pas reçu mon code de connexion',
+    answer:
+      'Attends la fin du compte à rebours puis appuie sur « Renvoyer ». Vérifie aussi que ton numéro est correct.',
   },
 ];
 
-export default function AssistantScreen() {
+export default function HelpScreen() {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Besoin d'aide ?</Text>
-        <Text style={styles.subtitle}>
-          Voici les réponses aux questions les plus fréquentes.
-        </Text>
+      <ScreenHeader title="Aide" subtitle="Les questions les plus fréquentes" action="close" />
 
-        <View style={{ height: Spacing.lg }} />
-
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {QUESTIONS.map((item) => (
           <View key={item.question} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="help-circle" size={20} color={Colors.yonn} />
-              <Text style={styles.question}>{item.question}</Text>
-            </View>
+            <Text style={styles.question}>{item.question}</Text>
             <Text style={styles.answer}>{item.answer}</Text>
           </View>
         ))}
@@ -61,48 +60,27 @@ export default function AssistantScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: Colors.cream },
-  scroll: {
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
+  safe: { flex: 1, backgroundColor: c.canvas },
+  content: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.xl,
-  },
-  title: {
-    fontFamily: Fonts.display,
-    fontSize: 26,
-    color: Colors.ma,
-  },
-  subtitle: {
-    fontFamily: Fonts.body,
-    fontSize: 14,
-    color: Colors.stone,
-    marginTop: 4,
+    paddingBottom: Spacing.xl,
+    gap: Spacing.sm,
   },
   card: {
-    backgroundColor: Colors.white,
-    borderRadius: Radii.md,
+    backgroundColor: c.surface,
+    borderRadius: Radii.lg,
     borderWidth: 1,
-    borderColor: Colors.stoneLight,
+    borderColor: c.line,
     padding: Spacing.md,
-    marginBottom: Spacing.sm,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  question: {
-    flex: 1,
-    fontFamily: Fonts.bodySemi,
-    fontSize: 14,
-    color: Colors.ma,
-  },
+  question: { fontFamily: Fonts.bodySemi, fontSize: 15, color: c.ink },
   answer: {
     fontFamily: Fonts.body,
-    fontSize: 13,
-    color: Colors.stone,
-    marginTop: Spacing.xs,
-    lineHeight: 19,
+    fontSize: 14,
+    color: c.inkMuted,
+    marginTop: Spacing.sm,
+    lineHeight: 21,
   },
 });

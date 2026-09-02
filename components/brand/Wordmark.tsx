@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Colors, Fonts } from '../../constants/theme';
+import { Fonts, Palette } from '../../constants/theme';
+import { useColors } from '../../store/ThemeContext';
 
 export default function Wordmark({
   size = 36,
@@ -9,6 +10,8 @@ export default function Wordmark({
   size?: number;
   variant?: 'default' | 'inverted';
 }) {
+  const c = useColors();
+  const styles = useMemo(() => createStyles(c), [c]);
   const isInverted = variant === 'inverted';
   return (
     <View
@@ -19,19 +22,20 @@ export default function Wordmark({
       <Text
         style={[
           styles.text,
-          { fontSize: size, color: isInverted ? Colors.white : Colors.yonn },
+          { fontSize: size, color: isInverted ? c.surface : c.yonn },
         ]}
       >
         Yonn
       </Text>
-      <Text style={[styles.text, { fontSize: size, color: Colors.ma }]}>
+      <Text style={[styles.text, { fontSize: size, color: c.ink }]}>
         ma
       </Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: Palette) =>
+  StyleSheet.create({
   row: { flexDirection: 'row' },
   text: {
     fontFamily: Fonts.display,
