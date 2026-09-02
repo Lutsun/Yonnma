@@ -80,6 +80,10 @@ group by l.id, l.code, l.name;
 -- Fonction : arrêts les plus proches d'un point donné (position de
 -- l'utilisateur), triés par distance. C'est ce que l'écran d'accueil
 -- appelle pour afficher les arrêts autour de soi.
+--
+-- `drop function` d'abord : Postgres refuse de changer les colonnes d'une
+-- fonction existante via `create or replace` (seul son corps peut changer).
+drop function if exists nearby_stops(double precision, double precision, int);
 create or replace function nearby_stops(
   lat double precision,
   lng double precision,
@@ -91,7 +95,8 @@ returns table (
   latitude double precision,
   longitude double precision,
   distance_meters double precision,
-  lines text[]
+  lines text[],
+  operator_colors text[]
 )
 language sql
 stable
@@ -108,7 +113,15 @@ as $$
        join lines l on l.id = ls.line_id
        where ls.stop_id = s.id),
       '{}'
-    ) as lines
+    ) as lines,
+    coalesce(
+      (select array_agg(distinct o.color order by o.color)
+       from line_stops ls
+       join lines l on l.id = ls.line_id
+       join operators o on o.id = l.operator_id
+       where ls.stop_id = s.id),
+      '{}'
+    ) as operator_colors
   from stops s
   where st_dwithin(s.location, st_setsrid(st_point(lng, lat), 4326)::geography, radius_meters)
   order by distance_meters asc;
@@ -141,12 +154,15 @@ $$;
 
 -- Fonction : recherche d'arrêts par nom (utilisée par la barre "Où
 -- voulez-vous aller ?" de l'écran d'accueil).
+drop function if exists search_stops(text);
 create or replace function search_stops(query text)
 returns table (
   id uuid,
   name text,
   latitude double precision,
-  longitude double precision
+  longitude double precision,
+  lines text[],
+  operator_colors text[]
 )
 language sql
 stable
@@ -155,7 +171,22 @@ as $$
     s.id,
     s.name,
     st_y(s.location::geometry) as latitude,
-    st_x(s.location::geometry) as longitude
+    st_x(s.location::geometry) as longitude,
+    coalesce(
+      (select array_agg(l.code order by l.code)
+       from line_stops ls
+       join lines l on l.id = ls.line_id
+       where ls.stop_id = s.id),
+      '{}'
+    ) as lines,
+    coalesce(
+      (select array_agg(distinct o.color order by o.color)
+       from line_stops ls
+       join lines l on l.id = ls.line_id
+       join operators o on o.id = l.operator_id
+       where ls.stop_id = s.id),
+      '{}'
+    ) as operator_colors
   from stops s
   where s.name ilike '%' || query || '%'
   order by s.name
