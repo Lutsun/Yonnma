@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
-import { Stop, TripPlan } from '../types/transit';
+import { Stop, TripOption, TripPlan } from '../types/transit';
 
 // Trajet actuellement affiché sur la carte d'accueil, calculé par le
 // planificateur d'itinéraire (app/(modals)/itinerary.tsx). Un contexte
@@ -11,24 +11,50 @@ export type ActiveTrip = {
   plan: TripPlan;
 };
 
+// Options calculées par itinerary.tsx, en attente d'un choix sur l'écran
+// "Choisir un trajet" (choose-trip.tsx).
+export type PendingTrip = {
+  origin: Stop;
+  destination: Stop;
+  options: TripOption[];
+};
+
+// Option choisie sur choose-trip.tsx, en attente de confirmation sur
+// l'écran "Votre itinéraire" (trip-detail.tsx) avant de démarrer le guide.
+export type PreviewTrip = {
+  origin: Stop;
+  destination: Stop;
+  plan: TripPlan;
+};
+
 type TripContextValue = {
   activeTrip: ActiveTrip | null;
   setActiveTrip: (trip: ActiveTrip) => void;
   clearActiveTrip: () => void;
+  pendingTrip: PendingTrip | null;
+  setPendingTrip: (trip: PendingTrip) => void;
+  previewTrip: PreviewTrip | null;
+  setPreviewTrip: (trip: PreviewTrip) => void;
 };
 
 const TripContext = createContext<TripContextValue | undefined>(undefined);
 
 export function TripProvider({ children }: { children: React.ReactNode }) {
   const [activeTrip, setActiveTripState] = useState<ActiveTrip | null>(null);
+  const [pendingTrip, setPendingTripState] = useState<PendingTrip | null>(null);
+  const [previewTrip, setPreviewTripState] = useState<PreviewTrip | null>(null);
 
   const value = useMemo<TripContextValue>(
     () => ({
       activeTrip,
       setActiveTrip: (trip) => setActiveTripState(trip),
       clearActiveTrip: () => setActiveTripState(null),
+      pendingTrip,
+      setPendingTrip: (trip) => setPendingTripState(trip),
+      previewTrip,
+      setPreviewTrip: (trip) => setPreviewTripState(trip),
     }),
-    [activeTrip]
+    [activeTrip, pendingTrip, previewTrip]
   );
 
   return <TripContext.Provider value={value}>{children}</TripContext.Provider>;

@@ -14,12 +14,15 @@
 //  - chaque ligne dessert ses arrêts dans les deux sens
 
 import { distanceKm } from '../utils/eta';
-import { RouteGraphRow, TripPlan, TripSegment } from '../types/transit';
+import { LatLng, RouteGraphRow, Stop, TripOption, TripPlan, TripSegment } from '../types/transit';
 
 const BUS_SPEED_KMH = 16;
 const WALK_SPEED_KMH = 4.5;
 const BOARD_WAIT_MINUTES = 6;
 const WALK_TRANSFER_RADIUS_KM = 0.35;
+// En dessous, on considère que l'utilisateur est déjà à l'arrêt : inutile de
+// lui afficher une étape "marcher 20 m".
+const MIN_ACCESS_WALK_KM = 0.06;
 
 type GraphStop = { id: string; name: string; latitude: number; longitude: number };
 
@@ -118,7 +121,8 @@ function stateKey(stopId: string, lineId: string | null) {
 function findShortestPath(
   graph: RouteGraph,
   originStopId: string,
-  destinationStopId: string
+  destinationStopId: string,
+  excludeLineIds?: Set<string>
 ): PathEdge[] | null {
   if (originStopId === destinationStopId) return [];
 
@@ -165,6 +169,7 @@ function findShortestPath(
     }
 
     for (const edge of graph.rideEdges.get(stopId) ?? []) {
+      if (excludeLineIds?.has(edge.lineId)) continue;
       const wait = currentLineId === edge.lineId ? 0 : BOARD_WAIT_MINUTES;
       const newDist = currentDist + edge.minutes + wait;
       const newKey = stateKey(edge.toStopId, edge.lineId);
@@ -254,17 +259,89 @@ function segmentsFromPath(graph: RouteGraph, path: PathEdge[]): TripSegment[] {
 export function planTrip(
   graph: RouteGraph,
   originStopId: string,
-  destinationStopId: string
+  destinationStopId: string,
+  excludeLineIds?: Set<string>
 ): TripPlan | null {
-  const path = findShortestPath(graph, originStopId, destinationStopId);
+  const path = findShortestPath(graph, originStopId, destinationStopId, excludeLineIds);
   if (path === null) return null;
-  if (path.length === 0) return { totalMinutes: 0, totalFareFcfa: 0, segments: [] };
+  if (path.length === 0) return { totalMinutes: 0, totalFareFcfa: 0, totalWalkMinutes: 0, segments: [] };
 
   const segments = segmentsFromPath(graph, path);
   const totalMinutes = path.reduce((sum, edge) => sum + edge.minutes, 0);
   const totalFareFcfa = segments
     .filter((s): s is Extract<TripSegment, { type: 'ride' }> => s.type === 'ride')
     .reduce((sum, s) => sum + s.fareFcfa, 0);
+  const totalWalkMinutes = segments
+    .filter((s): s is Extract<TripSegment, { type: 'walk' }> => s.type === 'walk')
+    .reduce((sum, s) => sum + s.minutes, 0);
 
-  return { totalMinutes, totalFareFcfa, segments };
+  return { totalMinutes, totalFareFcfa, totalWalkMinutes, segments };
+}
+
+// Ajoute la marche réelle depuis la position GPS de l'utilisateur jusqu'à
+// l'arrêt où il monte. Sans ça le trajet démarre à l'arrêt, comme si
+// l'utilisateur y était déjà téléporté : le temps annoncé était donc
+// systématiquement sous-estimé.
+export function withAccessWalk(plan: TripPlan, from: LatLng, boardingStop: Stop): TripPlan {
+  const km = distanceKm(from.latitude, from.longitude, boardingStop.latitude, boardingStop.longitude);
+  if (km < MIN_ACCESS_WALK_KM) return plan;
+
+  const minutes = Math.max(1, Math.round((km / WALK_SPEED_KMH) * 60));
+  const walk: TripSegment = {
+    type: 'walk',
+    fromStopId: 'user-position',
+    fromStopName: 'Ma position',
+    toStopId: boardingStop.id,
+    toStopName: boardingStop.name,
+    minutes,
+    path: [
+      { latitude: from.latitude, longitude: from.longitude },
+      { latitude: boardingStop.latitude, longitude: boardingStop.longitude },
+    ],
+  };
+
+  return {
+    ...plan,
+    totalMinutes: plan.totalMinutes + minutes,
+    totalWalkMinutes: plan.totalWalkMinutes + minutes,
+    segments: [walk, ...plan.segments],
+  };
+}
+
+// Calcule jusqu'à deux options de trajet, pour l'écran "Choisir un trajet" :
+// la plus rapide (recommandée), puis — si le réseau le permet — une
+// alternative obtenue en excluant la ligne principale du premier trajet
+// (donc forcément différente), pour donner un vrai choix plutôt qu'une
+// simple confirmation.
+export function planTripOptions(
+  graph: RouteGraph,
+  originStopId: string,
+  destinationStopId: string
+): TripOption[] {
+  const best = planTrip(graph, originStopId, destinationStopId);
+  if (best === null || best.segments.length === 0) {
+    return best ? [{ plan: best, recommended: true }] : [];
+  }
+
+  const rideSegments = best.segments.filter(
+    (s): s is Extract<TripSegment, { type: 'ride' }> => s.type === 'ride'
+  );
+  const mainLine = rideSegments.reduce(
+    (longest, s) => (s.minutes > longest.minutes ? s : longest),
+    rideSegments[0]
+  );
+
+  const options: TripOption[] = [{ plan: best, recommended: true }];
+
+  if (mainLine) {
+    const alt = planTrip(graph, originStopId, destinationStopId, new Set([mainLine.lineId]));
+    const altMainLine = alt?.segments.find(
+      (s): s is Extract<TripSegment, { type: 'ride' }> => s.type === 'ride' && s.lineId !== mainLine.lineId
+    );
+    if (alt && alt.segments.length > 0 && altMainLine) {
+      options.push({ plan: alt, recommended: false });
+    }
+  }
+
+  return options;
 }

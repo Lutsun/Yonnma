@@ -21,6 +21,7 @@ export type Stop = {
   longitude: number;
   distance_meters?: number;
   lines?: string[];
+  operator_colors?: string[];
 };
 
 export type Trip = {
@@ -83,5 +84,14 @@ export type TripSegment = RideSegment | WalkSegment;
 export type TripPlan = {
   totalMinutes: number;
   totalFareFcfa: number;
+  totalWalkMinutes: number;
   segments: TripSegment[];
+};
+
+// Une option de trajet parmi lesquelles choisir (écran "Choisir un trajet") —
+// la première option renvoyée par `planTripOptions` est la recommandée
+// (la plus rapide).
+export type TripOption = {
+  plan: TripPlan;
+  recommended: boolean;
 };
