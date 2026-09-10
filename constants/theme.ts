@@ -9,6 +9,17 @@
 // Les écrans ne lisent jamais ces palettes directement : ils passent par
 // `useColors()` (voir store/ThemeContext.tsx) pour suivre le mode choisi.
 
+// Identité de marque — volontairement HORS du système clair/sombre.
+// L'écran d'ouverture et le logo inversé doivent rester strictement
+// identiques quel que soit le thème : c'est une identité, pas une couleur
+// d'interface. `green` reprend exactement la couleur du splash natif
+// (app.json), pour qu'il n'y ait aucun changement de teinte au lancement.
+export const Brand = {
+  green: '#1DB954',
+  onGreen: '#FFFFFF', // le « Yonn » du logo inversé
+  wordmarkInk: '#201E1D', // le « ma » du logo inversé
+};
+
 export type Palette = {
   yonn: string;
   yonnDark: string;

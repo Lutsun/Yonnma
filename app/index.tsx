@@ -1,21 +1,23 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+
 import Wordmark from '../components/brand/Wordmark';
 import { useAuth } from '../store/AuthContext';
-import { Palette } from '../constants/theme';
-import { useColors } from '../store/ThemeContext';
+import { Brand } from '../constants/theme';
 
 // Écran d'ouverture : présente la marque sur fond vert pendant un court
 // instant (comme Yango, Yassir...) avant d'atterrir sur la connexion ou,
 // si l'utilisateur est déjà connecté, directement sur l'app.
+//
+// Ses couleurs sont figées (Brand) et ne suivent pas le thème : le fond doit
+// prolonger exactement le splash natif, sans changement de teinte, que l'app
+// soit en clair ou en sombre.
 
 const PRESENTATION_DURATION = 1400;
 
 export default function Index() {
-  const c = useColors();
-  const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
   const { isLoggedIn, isRestoring, needsProfile, session } = useAuth();
   const progress = useRef(new Animated.Value(0)).current;
@@ -53,12 +55,7 @@ export default function Index() {
         style={{
           opacity: progress,
           transform: [
-            {
-              scale: progress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.9, 1],
-              }),
-            },
+            { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) },
           ],
         }}
       >
@@ -68,11 +65,10 @@ export default function Index() {
   );
 }
 
-const createStyles = (c: Palette) =>
-  StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: c.yonn,
+    backgroundColor: Brand.green,
     alignItems: 'center',
     justifyContent: 'center',
   },

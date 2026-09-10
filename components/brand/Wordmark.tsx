@@ -1,8 +1,14 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Fonts, Palette } from '../../constants/theme';
+import { Brand, Fonts } from '../../constants/theme';
 import { useColors } from '../../store/ThemeContext';
 
+// Le logo Yonnma.
+//   - `default`  : posé sur un fond d'interface, il suit le thème pour rester
+//                  lisible en clair comme en sombre.
+//   - `inverted` : posé sur le vert de la marque (écran d'ouverture), il garde
+//                  des couleurs figées — « Yonn » blanc, « ma » noir — pour ne
+//                  jamais changer d'aspect d'un lancement à l'autre.
 export default function Wordmark({
   size = 36,
   variant = 'default',
@@ -11,31 +17,20 @@ export default function Wordmark({
   variant?: 'default' | 'inverted';
 }) {
   const c = useColors();
-  const styles = useMemo(() => createStyles(c), [c]);
-  const isInverted = variant === 'inverted';
+  const inverted = variant === 'inverted';
+
+  const yonnColor = inverted ? Brand.onGreen : c.yonn;
+  const maColor = inverted ? Brand.wordmarkInk : c.ink;
+
   return (
-    <View
-      style={styles.row}
-      accessibilityRole="header"
-      accessibilityLabel="Yonnma"
-    >
-      <Text
-        style={[
-          styles.text,
-          { fontSize: size, color: isInverted ? c.surface : c.yonn },
-        ]}
-      >
-        Yonn
-      </Text>
-      <Text style={[styles.text, { fontSize: size, color: c.ink }]}>
-        ma
-      </Text>
+    <View style={styles.row} accessibilityRole="header" accessibilityLabel="Yonnma">
+      <Text style={[styles.text, { fontSize: size, color: yonnColor }]}>Yonn</Text>
+      <Text style={[styles.text, { fontSize: size, color: maColor }]}>ma</Text>
     </View>
   );
 }
 
-const createStyles = (c: Palette) =>
-  StyleSheet.create({
+const styles = StyleSheet.create({
   row: { flexDirection: 'row' },
   text: {
     fontFamily: Fonts.display,
