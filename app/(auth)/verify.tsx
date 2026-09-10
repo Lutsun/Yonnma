@@ -8,7 +8,7 @@ import OtpInput from '../../components/auth/OtpInput';
 import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
 import { useColors } from '../../store/ThemeContext';
-import { sendOtp, verifyOtp } from '../../services/auth';
+import { sendOtp, verifyOtp, describeAuthError } from '../../services/auth';
 import { getProfile } from '../../services/profile';
 import { formatPhoneDisplay, toE164 } from '../../utils/phone';
 
@@ -50,8 +50,8 @@ export default function VerifyScreen() {
       } else {
         router.replace({ pathname: '/(auth)/complete-profile', params: { phone } });
       }
-    } catch {
-      setError('Code incorrect ou expiré');
+    } catch (e) {
+      setError(describeAuthError(e));
     } finally {
       setLoading(false);
     }
@@ -69,8 +69,8 @@ export default function VerifyScreen() {
     setCooldown(RESEND_COOLDOWN);
     try {
       await sendOtp(phone);
-    } catch {
-      setError("Impossible d'envoyer le code. Vérifie ta connexion.");
+    } catch (e) {
+      setError(describeAuthError(e));
     }
   };
 

@@ -16,7 +16,7 @@ import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
 import { useColors } from '../../store/ThemeContext';
 import { isValidSenegalPhone } from '../../utils/phone';
-import { sendOtp } from '../../services/auth';
+import { sendOtp, describeAuthError } from '../../services/auth';
 
 export default function LoginScreen() {
   const c = useColors();
@@ -36,8 +36,8 @@ export default function LoginScreen() {
     try {
       await sendOtp(phone);
       router.push({ pathname: '/(auth)/verify', params: { phone } });
-    } catch {
-      setError("Impossible d'envoyer le code. Vérifie ta connexion et réessaie.");
+    } catch (e) {
+      setError(describeAuthError(e));
     } finally {
       setLoading(false);
     }
