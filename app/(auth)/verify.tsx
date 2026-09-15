@@ -19,7 +19,8 @@ export default function VerifyScreen() {
   const c = useColors();
   const styles = useMemo(() => createStyles(c), [c]);
   const router = useRouter();
-  const { phone } = useLocalSearchParams<{ phone: string }>();
+  const { phone, mode } = useLocalSearchParams<{ phone: string; mode?: string }>();
+  const isSignup = mode === 'signup';
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -90,7 +91,7 @@ export default function VerifyScreen() {
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.title}>Vérification</Text>
+        <Text style={styles.title}>{isSignup ? 'Confirmez votre numéro' : 'Vérification'}</Text>
         <Text style={styles.subtitle}>
           Entrez le code à {CODE_LENGTH} chiffres envoyé au{' '}
           <Text style={styles.phone}>+221 {formatPhoneDisplay(phone ?? '')}</Text>
