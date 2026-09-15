@@ -15,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import TripSteps from '../../components/trip/TripSteps';
+import NavigationBanner from '../../components/trip/NavigationBanner';
+import { computeNavigation, formatMeters, NavigationState } from '../../services/navigation';
 import { useAuth } from '../../store/AuthContext';
 import { useTrip } from '../../store/TripContext';
 import { useTheme } from '../../store/ThemeContext';
@@ -32,7 +34,8 @@ import { Stop } from '../../types/transit';
 import { initialsOf } from '../../utils/text';
 import { distanceKm } from '../../utils/eta';
 
-const ARRIVAL_RADIUS_METERS = 60;
+// Niveau de zoom pendant le guidage : assez serré pour voir la rue suivante.
+const NAVIGATION_ZOOM = 16.5;
 
 const DAKAR_REGION: Region = {
   latitude: 14.6928,
@@ -60,7 +63,13 @@ export default function HomeScreen() {
   const [hasFix, setHasFix] = useState(false);
   const [stops, setStops] = useState<Stop[]>([]);
   const [stopsError, setStopsError] = useState(false);
-  const [activeStepIndex, setActiveStepIndex] = useState(-1);
+
+  // État du guidage, recalculé à chaque position (voir services/navigation.ts).
+  const [nav, setNav] = useState<NavigationState | null>(null);
+  // L'avancement doit être monotone : on garde la dernière étape atteinte.
+  const stepIndexRef = useRef(0);
+  // La caméra suit l'utilisateur, jusqu'à ce qu'il déplace la carte lui-même.
+  const [following, setFollowing] = useState(false);
 
   const loadNearbyStops = async (latitude: number, longitude: number) => {
     try {
@@ -144,55 +153,68 @@ export default function HomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [region.latitude, region.longitude, hasFix, activeTrip]);
 
-  // Cadre la carte sur l'itinéraire dès qu'un trajet démarre.
+  // Départ d'un trajet : on montre l'itinéraire en entier une fois, puis la
+  // caméra se met à suivre l'utilisateur.
   useEffect(() => {
-    if (!activeTrip) return;
+    if (!activeTrip) {
+      setNav(null);
+      setFollowing(false);
+      stepIndexRef.current = 0;
+      return;
+    }
+    stepIndexRef.current = 0;
     const coords = activeTrip.plan.segments.flatMap((s) => s.path);
     if (coords.length > 0) {
       mapRef.current?.fitToCoordinates(coords, {
-        edgePadding: { top: 120, right: 56, bottom: 380, left: 56 },
+        edgePadding: { top: 160, right: 56, bottom: 360, left: 56 },
         animated: true,
       });
     }
+    const timer = setTimeout(() => setFollowing(true), 1600);
+    return () => clearTimeout(timer);
   }, [activeTrip]);
 
-  // Guidage : à chaque nouvelle position, on retrouve l'étape la plus proche
-  // pour la surligner, et on détecte l'arrivée.
+  // Le cœur du guidage : à chaque position, on recalcule l'étape en cours,
+  // la distance jusqu'à la prochaine action et le temps restant.
   useEffect(() => {
-    if (!activeTrip) {
-      setActiveStepIndex(-1);
-      return;
-    }
-    const toDestinationM =
-      distanceKm(
-        region.latitude,
-        region.longitude,
-        activeTrip.destination.latitude,
-        activeTrip.destination.longitude
-      ) * 1000;
-
-    if (toDestinationM <= ARRIVAL_RADIUS_METERS) {
-      setActiveStepIndex(activeTrip.plan.segments.length);
-      return;
-    }
-
-    let bestIndex = 0;
-    let bestDistanceM = Infinity;
-    activeTrip.plan.segments.forEach((segment, index) => {
-      segment.path.forEach((point) => {
-        const d =
-          distanceKm(region.latitude, region.longitude, point.latitude, point.longitude) * 1000;
-        if (d < bestDistanceM) {
-          bestDistanceM = d;
-          bestIndex = index;
-        }
-      });
-    });
-    setActiveStepIndex(bestIndex);
+    if (!activeTrip) return;
+    const next = computeNavigation(
+      activeTrip.plan,
+      { latitude: region.latitude, longitude: region.longitude },
+      activeTrip.destination.name,
+      stepIndexRef.current
+    );
+    stepIndexRef.current = next.stepIndex;
+    setNav(next);
   }, [region, activeTrip]);
 
+  // Caméra qui suit, comme un GPS : recentrée à chaque nouvelle position tant
+  // que l'utilisateur n'a pas déplacé la carte lui-même.
+  useEffect(() => {
+    if (!activeTrip || !following || !hasFix) return;
+    mapRef.current?.animateCamera(
+      { center: { latitude: region.latitude, longitude: region.longitude }, zoom: NAVIGATION_ZOOM },
+      { duration: 700 }
+    );
+  }, [region.latitude, region.longitude, following, activeTrip, hasFix]);
+
+  const recenter = () => {
+    if (activeTrip) {
+      setFollowing(true);
+      mapRef.current?.animateCamera(
+        {
+          center: { latitude: region.latitude, longitude: region.longitude },
+          zoom: NAVIGATION_ZOOM,
+        },
+        { duration: 500 }
+      );
+      return;
+    }
+    locateMe();
+  };
+
   const firstName = user?.fullName?.trim().split(/\s+/)[0];
-  const arrived = !!activeTrip && activeStepIndex >= activeTrip.plan.segments.length;
+  const arrived = nav?.arrived ?? false;
   const sheetBottom = insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.sm;
 
   return (
@@ -207,6 +229,9 @@ export default function HomeScreen() {
         // Masque les commerces d'Apple Maps : seuls les arrêts Yonnma restent.
         showsPointsOfInterests={false}
         userInterfaceStyle={isDark ? 'dark' : 'light'}
+        // Dès que l'utilisateur déplace la carte, on arrête de la recentrer
+        // sous ses doigts — il reprend la main jusqu'à ce qu'il le redemande.
+        onPanDrag={() => following && setFollowing(false)}
       >
         {!activeTrip &&
           stops.map((stop) => (
@@ -263,16 +288,13 @@ export default function HomeScreen() {
       )}
 
       <View style={[styles.topBar, { paddingTop: insets.top + Spacing.sm }]} pointerEvents="box-none">
-        {activeTrip ? (
-          <View style={styles.tripHeader}>
+        {activeTrip && nav ? (
+          <View style={styles.navHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.tripHeaderLabel}>En route vers</Text>
-              <Text style={styles.tripHeaderValue} numberOfLines={1}>
-                {activeTrip.destination.name}
-              </Text>
+              <NavigationBanner nav={nav} />
             </View>
             <TouchableOpacity
-              style={styles.tripHeaderClose}
+              style={styles.navClose}
               onPress={clearActiveTrip}
               accessibilityRole="button"
               accessibilityLabel="Arrêter le guidage"
@@ -280,7 +302,7 @@ export default function HomeScreen() {
               <Ionicons name="close" size={18} color={c.ink} />
             </TouchableOpacity>
           </View>
-        ) : (
+        ) : activeTrip ? null : (
           <View style={styles.greeting}>
             <View style={styles.greetingAvatar}>
               <Text style={styles.greetingInitials}>{user ? initialsOf(user.fullName) : ''}</Text>
@@ -318,10 +340,16 @@ export default function HomeScreen() {
       </View>
 
       <TouchableOpacity
-        style={[styles.locateButton, { bottom: sheetBottom + (activeTrip ? 320 : 76) }]}
-        onPress={locateMe}
+        style={[
+          styles.locateButton,
+          { bottom: sheetBottom + (activeTrip ? 320 : 76) },
+          activeTrip && following && styles.locateButtonActive,
+        ]}
+        onPress={recenter}
         accessibilityRole="button"
-        accessibilityLabel="Centrer sur ma position"
+        accessibilityLabel={
+          activeTrip && !following ? 'Reprendre le suivi' : 'Centrer sur ma position'
+        }
       >
         <Ionicons name="navigate" size={19} color={hasFix ? c.yonn : c.inkFaint} />
       </TouchableOpacity>
@@ -330,8 +358,21 @@ export default function HomeScreen() {
         <View style={[styles.sheet, { bottom: sheetBottom }]}>
           <View style={styles.sheetHandle} />
 
+          {/* Pendant le guidage, ce qui compte est ce qu'il RESTE, pas les
+              totaux du départ : les deux premières valeurs se recalculent à
+              chaque position. */}
           <View style={styles.tripStats}>
-            <Stat styles={styles} value={`${activeTrip.plan.totalMinutes} min`} label="durée" />
+            <Stat
+              styles={styles}
+              value={nav && !arrived ? `${nav.remainingMinutes} min` : '—'}
+              label="restant"
+            />
+            <View style={styles.statDivider} />
+            <Stat
+              styles={styles}
+              value={nav && !arrived ? formatMeters(nav.remainingMeters) : '—'}
+              label="distance"
+            />
             <View style={styles.statDivider} />
             <Stat
               styles={styles}
@@ -339,8 +380,6 @@ export default function HomeScreen() {
               label="prix"
               color={c.yonnDark}
             />
-            <View style={styles.statDivider} />
-            <Stat styles={styles} value={`${activeTrip.plan.totalWalkMinutes} min`} label="à pied" />
           </View>
 
           {arrived && (
@@ -359,7 +398,7 @@ export default function HomeScreen() {
               origin={activeTrip.origin}
               destination={activeTrip.destination}
               segments={activeTrip.plan.segments}
-              activeIndex={activeStepIndex}
+              activeIndex={nav?.stepIndex ?? -1}
             />
           </ScrollView>
 
@@ -486,25 +525,15 @@ const createStyles = (c: Palette, isDark: boolean) => {
     greetingInitials: { fontFamily: Fonts.bodySemi, fontSize: 12, color: c.yonnDark },
     greetingText: { fontFamily: Fonts.bodySemi, fontSize: 14, color: c.ink },
 
-    tripHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: Spacing.sm,
-      backgroundColor: c.surface,
-      borderRadius: Radii.lg,
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-      ...e.floating,
-    },
-    tripHeaderLabel: { fontFamily: Fonts.body, fontSize: 11, color: c.inkFaint },
-    tripHeaderValue: { fontFamily: Fonts.displaySemi, fontSize: 16, color: c.ink, marginTop: 1 },
-    tripHeaderClose: {
-      width: 32,
-      height: 32,
+    navHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
+    navClose: {
+      width: 38,
+      height: 38,
       borderRadius: Radii.pill,
-      backgroundColor: c.fill,
+      backgroundColor: c.surface,
       alignItems: 'center',
       justifyContent: 'center',
+      ...e.control,
     },
 
     notice: {
@@ -563,6 +592,8 @@ const createStyles = (c: Palette, isDark: boolean) => {
       justifyContent: 'center',
       ...e.control,
     },
+    // Suivi actif : le bouton s'éteint visuellement, il n'y a rien à recentrer.
+    locateButtonActive: { backgroundColor: c.yonnTint },
 
     searchBar: {
       position: 'absolute',
