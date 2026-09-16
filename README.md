@@ -43,6 +43,7 @@ supabase/
   schema.sql              Schéma de la base (tables + fonctions PostGIS)
   seed.sql                 Données réelles de démarrage (lignes et arrêts de Dakar)
   migrate_to_auth.sql      Migration ponctuelle (ancienne table `users` faite main -> Supabase Auth)
+  seed_osm.sql             Tracés relevés sur le terrain (OpenStreetMap, ODbL)
 ```
 
 ## Base de données
@@ -51,7 +52,22 @@ Le schéma (`supabase/schema.sql`) est volontairement simple : sept tables (`ope
 
 `profiles` ne stocke que les infos propres à Yonnma (nom, ville) — les comptes eux-mêmes sont de vrais comptes **Supabase Auth** (téléphone + code SMS), pas une table maison. Chaque table sensible (`profiles`, `user_trips`, `favorite_lines`) est protégée par des policies Row Level Security basées sur `auth.uid()` : un utilisateur ne peut lire ou modifier que ses propres données.
 
-Les données de démarrage (`supabase/seed.sql`) sont **réelles**, pas inventées : la ligne B1 complète du BRT de Dakar, et une trentaine de lignes Dakar Dem Dikk et Tata AFTU (numéros, parcours et tarifs vérifiés via demdikk.sn, aftu-senegal.org et Moovit), avec des coordonnées GPS.
+### D'où viennent les données de transport
+
+Le réseau chargé par l'application vient de deux fichiers, dont le niveau de fiabilité diffère — la distinction compte si ces données sont citées dans un mémoire.
+
+| | `seed_osm.sql` | `seed.sql` |
+|---|---|---|
+| Couverture | 7 lignes (BRT B1, DDD 1, 4, 7, 9, 10, 23) | ~45 lignes, tout le reste du réseau |
+| Coordonnées des arrêts | relevées sur le terrain | estimées au centre du quartier desservi |
+| Ordre des arrêts | relevé | déduit du corridor géographique |
+| Source | OpenStreetMap, via l'API Overpass | demdikk.sn, aftu-senegal.org, Moovit |
+
+Dans les deux cas, les **opérateurs, numéros de ligne, terminus et tarifs sont sourcés**, et les noms d'arrêts sont de vrais lieux de Dakar. Ce qui reste approximatif dans `seed.sql`, ce sont les positions GPS et surtout l'ordre des arrêts intermédiaires : les sources publiques ne publient que les terminus et quelques points de passage. Les durées et les prix calculés sont donc des ordres de grandeur, pas des horaires.
+
+`seed_osm.sql` fait autorité sur les lignes qu'il couvre et remplace leur tracé approximatif. Ses données sont sous licence **ODbL** : leur réutilisation impose de citer « © les contributeurs OpenStreetMap ».
+
+Pour aller plus loin, la piste la plus solide serait un export GTFS du CETUD (l'autorité organisatrice des transports de Dakar), qui fournirait les tracés et les horaires officiels.
 
 ## Démarrage
 
@@ -70,7 +86,7 @@ cp .env.example .env
 Configuration Supabase :
 
 1. Si tu reviens d'une ancienne version du projet (table `users` faite main) : exécute d'abord `supabase/migrate_to_auth.sql` une seule fois. Sur un projet Supabase tout neuf, passe directement à l'étape 2.
-2. Dans l'éditeur SQL, exécute dans l'ordre `supabase/schema.sql` puis `supabase/seed.sql`.
+2. Dans l'éditeur SQL, exécute dans l'ordre `supabase/schema.sql`, `supabase/seed.sql`, puis `supabase/seed_osm.sql`.
 3. Dans le dashboard Supabase : **Authentication > Providers > Phone**, active le provider "Phone". Sans fournisseur SMS payant configuré, ajoute des **Test Phone Numbers** (numéro + code fixe, ex. `+221700000001` / `123456`) pour te connecter et tester gratuitement — l'authentification reste 100 % réelle (vrais comptes, vrais tokens), seuls ces numéros peuvent recevoir un code. Pour envoyer de vrais SMS à de vrais numéros sénégalais, configure un fournisseur SMS (Twilio, Vonage...) dans le même écran.
 
 ```bash
