@@ -36,7 +36,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Yonnma utilise ta position pour te montrer les arrêts de bus autour de toi."
+          "locationWhenInUsePermission": "Yonnma utilise ta position pour te montrer les arrêts de bus autour de toi, calculer ton itinéraire depuis l’endroit où tu te trouves et te guider jusqu’à destination.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "motionUsagePermission": false,
+          "isIosBackgroundLocationEnabled": false
         }
       ]
     ],

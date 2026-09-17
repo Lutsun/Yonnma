@@ -6,6 +6,7 @@ import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
 import { useColors } from '../../store/ThemeContext';
 import { Stop, TripSegment } from '../../types/transit';
 import { distanceKm, formatDistance } from '../../utils/eta';
+import { USER_POSITION_ID } from '../../services/routing';
 
 export function segmentDistanceKm(segment: TripSegment): number {
   let total = 0;
@@ -35,7 +36,7 @@ export default function TripSteps({ origin, destination, segments, activeIndex =
   // Quand le trajet commence par la marche depuis la position GPS (voir
   // `withAccessWalk`), le départ n'est pas l'arrêt mais l'utilisateur.
   const first = segments[0];
-  const startsFromUser = first?.type === 'walk' && first.fromStopId === 'user-position';
+  const startsFromUser = first?.type === 'walk' && first.fromStopId === USER_POSITION_ID;
   const originLabel = startsFromUser ? 'Ma position' : origin.name;
 
   return (

@@ -13,7 +13,7 @@ export default function NavigationBanner({ nav }: { nav: NavigationState }) {
   const { colors: c, isDark } = useTheme();
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
 
-  const { instruction, arrived, offRoute, progress } = nav;
+  const { instruction, arrived, offRoute, weakSignal, progress } = nav;
   const accent = instruction.lineColor ?? (arrived ? c.yonn : c.ink);
 
   return (
@@ -48,6 +48,15 @@ export default function NavigationBanner({ nav }: { nav: NavigationState }) {
           </Text>
         </View>
       </View>
+
+      {weakSignal && !arrived && (
+        <View style={styles.info}>
+          <Ionicons name="cellular-outline" size={15} color={c.inkMuted} />
+          <Text style={styles.infoText}>
+            Signal GPS faible — le guidage reprendra dès que ta position sera plus précise.
+          </Text>
+        </View>
+      )}
 
       {offRoute && !arrived && (
         <View style={styles.warning}>
@@ -100,6 +109,17 @@ const createStyles = (c: Palette, isDark: boolean) =>
       paddingVertical: 6,
     },
     warningText: { flex: 1, fontFamily: Fonts.bodyMedium, fontSize: 12, color: c.danger },
+
+    info: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      backgroundColor: c.fill,
+      borderRadius: Radii.sm,
+      paddingHorizontal: Spacing.sm,
+      paddingVertical: 6,
+    },
+    infoText: { flex: 1, fontFamily: Fonts.bodyMedium, fontSize: 12, color: c.inkMuted },
 
     track: { height: 4, borderRadius: 2, backgroundColor: c.fill, overflow: 'hidden' },
     trackFill: { height: 4, borderRadius: 2 },

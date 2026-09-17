@@ -12,16 +12,22 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 
 import ScreenHeader from '../../components/ui/ScreenHeader';
 import PrimaryButton from '../../components/ui/PrimaryButton';
 import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
 import { useColors } from '../../store/ThemeContext';
 import { getNearbyStops, getRouteGraph, searchStops } from '../../services/transit';
-import { buildRouteGraph, planTripOptions, withAccessWalk, RouteGraph } from '../../services/routing';
+import {
+  buildRouteGraph,
+  planFromPosition,
+  planTripOptions,
+  RouteGraph,
+  USER_POSITION_ID,
+} from '../../services/routing';
+import { useUserLocation } from '../../store/LocationContext';
 import { useTrip } from '../../store/TripContext';
-import { LatLng, Stop } from '../../types/transit';
+import { Stop } from '../../types/transit';
 import { formatDistance } from '../../utils/eta';
 
 // Le graphe du réseau ne change pas pendant une session : on le garde en
@@ -51,14 +57,15 @@ export default function ItineraryScreen() {
   const [activeField, setActiveField] = useState<Field | null>('destination');
   const [results, setResults] = useState<Stop[]>([]);
   const [suggestions, setSuggestions] = useState<Stop[]>([]);
-  const [locatingMe, setLocatingMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>('none');
 
-  // Position GPS réelle : sert à faire commencer le trajet là où l'utilisateur
-  // se trouve, et pas directement à l'arrêt.
-  const [userPosition, setUserPosition] = useState<LatLng | null>(null);
+  // Position GPS réelle, partagée avec la carte (store/LocationContext).
+  const { status: locationStatus, position, request: requestLocation } = useUserLocation();
+  // Le départ est « Ma position » : le trajet partira des coordonnées exactes
+  // de l'utilisateur, pas d'un arrêt choisi à sa place.
   const [originIsUser, setOriginIsUser] = useState(false);
+  const locatingMe = originIsUser && !position;
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -80,7 +87,7 @@ export default function ItineraryScreen() {
   // Champ vide : on propose les arrêts autour de la position réelle.
   useEffect(() => {
     const text = activeField === 'origin' ? originText : destinationText;
-    const around = userPosition ?? origin;
+    const around = position ?? (originIsUser ? null : origin);
     if (!activeField || text.trim() || !around) {
       setSuggestions([]);
       return;
@@ -88,43 +95,32 @@ export default function ItineraryScreen() {
     getNearbyStops(around.latitude, around.longitude, 3000)
       .then((s) => setSuggestions(s.filter((x) => x.id !== origin?.id).slice(0, 6)))
       .catch(() => setSuggestions([]));
-  }, [activeField, originText, destinationText, origin, userPosition]);
+  }, [activeField, originText, destinationText, origin, originIsUser, position]);
 
-  const useMyPosition = async (silent = false) => {
-    setLocatingMe(true);
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== 'granted') {
-        if (!silent) setOutcome('no-location');
-        return;
+  const useMyPosition = () => {
+    if (locationStatus !== 'ready' && locationStatus !== 'locating') {
+      // Autorisation manquante : on la demande (ou on ouvre les Réglages).
+      requestLocation();
+      if (locationStatus === 'denied' || locationStatus === 'services-off') {
+        setOutcome('no-location');
       }
-      // Précision maximale : c'est elle qui rend l'itinéraire réellement
-      // exact (le point de départ et la marche d'accès en dépendent).
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.BestForNavigation,
-      });
-      const here = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-      };
-      setUserPosition(here);
-
-      const nearby = await getNearbyStops(here.latitude, here.longitude, 3000);
-      if (nearby.length > 0) {
-        setOrigin(nearby[0]);
-        setOriginText('Ma position');
-        setOriginIsUser(true);
-        setOutcome('none');
-      }
-    } finally {
-      setLocatingMe(false);
+      return;
     }
+    setOriginIsUser(true);
+    setOriginText('Ma position');
+    setOutcome('none');
   };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Par défaut, on part de là où se trouve l'utilisateur.
+  const defaultedRef = useRef(false);
   useEffect(() => {
-    useMyPosition(true);
-  }, []);
+    if (defaultedRef.current || origin) return;
+    if (locationStatus === 'ready' || locationStatus === 'locating') {
+      defaultedRef.current = true;
+      setOriginIsUser(true);
+      setOriginText('Ma position');
+    }
+  }, [locationStatus, origin]);
 
   const selectStop = (stop: Stop) => {
     if (activeField === 'origin') {
@@ -143,43 +139,70 @@ export default function ItineraryScreen() {
   };
 
   const swap = () => {
-    setOrigin(destination);
-    setDestination(origin);
-    setOriginText(destinationText);
-    setDestinationText(originText);
-    setOriginIsUser(false);
+    // « Ma position » ne peut pas devenir une destination.
+    if (originIsUser) {
+      setOrigin(destination);
+      setOriginText(destinationText);
+      setDestination(null);
+      setDestinationText('');
+      setOriginIsUser(false);
+    } else {
+      setOrigin(destination);
+      setDestination(origin);
+      setOriginText(destinationText);
+      setDestinationText(originText);
+    }
     setOutcome('none');
   };
 
   const handleSearch = async () => {
-    if (!origin || !destination) return;
+    if (!destination) return;
+    if (originIsUser && !position) {
+      setOutcome('no-location');
+      return;
+    }
+    if (!originIsUser && !origin) return;
+
     Keyboard.dismiss();
     setActiveField(null);
     setLoading(true);
     setOutcome('none');
     try {
       if (!cachedGraph) cachedGraph = buildRouteGraph(await getRouteGraph());
-      let options = planTripOptions(cachedGraph, origin.id, destination.id);
+
+      let from: Stop;
+      let options;
+
+      if (originIsUser && position) {
+        // Départ réel : on compare les arrêts accessibles à pied (d'abord
+        // dans un rayon de marche raisonnable, sinon un peu plus loin).
+        let candidates = await getNearbyStops(position.latitude, position.longitude, 1200);
+        if (candidates.length === 0) {
+          candidates = await getNearbyStops(position.latitude, position.longitude, 3000);
+        }
+        options = planFromPosition(cachedGraph, position, candidates, destination.id);
+        // Le départ affiché et enregistré est la position de l'utilisateur.
+        from = {
+          id: USER_POSITION_ID,
+          name: 'Ma position',
+          latitude: position.latitude,
+          longitude: position.longitude,
+        };
+      } else {
+        options = planTripOptions(cachedGraph, origin!.id, destination.id);
+        from = origin!;
+        if (options.length > 0 && options[0].plan.segments.length === 0) {
+          setOutcome('same-stop');
+          return;
+        }
+      }
 
       if (options.length === 0) {
         setOutcome('no-path');
         return;
       }
-      if (options[0].plan.segments.length === 0) {
-        setOutcome('same-stop');
-        return;
-      }
 
-      // Le trajet part de la position réelle : on ajoute la marche jusqu'à
-      // l'arrêt de montée pour que durée et étapes soient exactes.
-      if (originIsUser && userPosition) {
-        options = options.map((o) => ({
-          ...o,
-          plan: withAccessWalk(o.plan, userPosition, origin),
-        }));
-      }
-
-      setPendingTrip({ origin, destination, options });
+      setPendingTrip({ origin: from, destination, options });
       router.push('/(modals)/choose-trip');
     } catch {
       setOutcome('error');
@@ -188,7 +211,9 @@ export default function ItineraryScreen() {
     }
   };
 
-  const canSearch = !!origin && !!destination && origin.id !== destination.id;
+  const canSearch =
+    !!destination &&
+    (originIsUser ? !!position : !!origin && origin.id !== destination.id);
   const list = results.length > 0 ? results : suggestions;
   const listIsSuggestions = results.length === 0 && suggestions.length > 0;
 
@@ -210,7 +235,7 @@ export default function ItineraryScreen() {
               colors={c}
               placeholder="Point de départ"
               value={originText}
-              filled={!!origin}
+              filled={originIsUser ? !!position : !!origin}
               onFocus={() => setActiveField('origin')}
               onChangeText={(t) => {
                 setOriginText(t);
@@ -246,7 +271,7 @@ export default function ItineraryScreen() {
         <View style={styles.actions}>
           <TouchableOpacity
             style={styles.myPosition}
-            onPress={() => useMyPosition(false)}
+            onPress={useMyPosition}
             disabled={locatingMe}
             accessibilityRole="button"
           >

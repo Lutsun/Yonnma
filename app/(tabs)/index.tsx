@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout, Polyline, Region } from 'react-native-maps';
-import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import TripSteps from '../../components/trip/TripSteps';
 import NavigationBanner from '../../components/trip/NavigationBanner';
@@ -20,6 +20,7 @@ import { computeNavigation, formatMeters, NavigationState } from '../../services
 import { useAuth } from '../../store/AuthContext';
 import { useTrip } from '../../store/TripContext';
 import { useTheme } from '../../store/ThemeContext';
+import { LocationStatus, useUserLocation } from '../../store/LocationContext';
 import {
   Fonts,
   Radii,
@@ -30,18 +31,41 @@ import {
   TAB_BAR_BOTTOM_MARGIN,
 } from '../../constants/theme';
 import { getNearbyStops } from '../../services/transit';
-import { Stop } from '../../types/transit';
+import { LatLng, Stop } from '../../types/transit';
 import { initialsOf } from '../../utils/text';
 import { distanceKm } from '../../utils/eta';
 
 // Niveau de zoom pendant le guidage : assez serré pour voir la rue suivante.
 const NAVIGATION_ZOOM = 16.5;
+const BROWSING_ZOOM = 15;
+const KEEP_AWAKE_TAG = 'yonnma-guidance';
 
 const DAKAR_REGION: Region = {
   latitude: 14.6928,
   longitude: -17.4467,
   latitudeDelta: 0.045,
   longitudeDelta: 0.045,
+};
+
+// Ce que la carte affiche quand elle ne peut pas localiser l'utilisateur.
+const LOCATION_BLOCKERS: Partial<
+  Record<LocationStatus, { text: string; action: string; icon: keyof typeof Ionicons.glyphMap }>
+> = {
+  'needs-permission': {
+    icon: 'location-outline',
+    text: 'Autorise la localisation pour voir où tu es et les arrêts autour de toi.',
+    action: 'Autoriser',
+  },
+  denied: {
+    icon: 'location-outline',
+    text: 'Yonnma n’a pas accès à ta position. Active-la dans les Réglages pour être guidé.',
+    action: 'Ouvrir les Réglages',
+  },
+  'services-off': {
+    icon: 'cellular-outline',
+    text: 'La localisation de ton téléphone est coupée. Active-la dans Réglages › Confidentialité.',
+    action: 'Ouvrir les Réglages',
+  },
 };
 
 // Accueil : la carte occupe tout l'écran, une seule action mène au
@@ -54,13 +78,9 @@ export default function HomeScreen() {
   const styles = useMemo(() => createStyles(c, isDark), [c, isDark]);
   const { user } = useAuth();
   const { activeTrip, clearActiveTrip } = useTrip();
+  const { status, position, precise, request } = useUserLocation();
   const mapRef = useRef<MapView>(null);
 
-  const [region, setRegion] = useState<Region>(DAKAR_REGION);
-  const [loadingLocation, setLoadingLocation] = useState(true);
-  const [locationDenied, setLocationDenied] = useState(false);
-  const [reducedAccuracy, setReducedAccuracy] = useState(false);
-  const [hasFix, setHasFix] = useState(false);
   const [stops, setStops] = useState<Stop[]>([]);
   const [stopsError, setStopsError] = useState(false);
 
@@ -71,98 +91,83 @@ export default function HomeScreen() {
   // La caméra suit l'utilisateur, jusqu'à ce qu'il déplace la carte lui-même.
   const [following, setFollowing] = useState(false);
 
-  const loadNearbyStops = async (latitude: number, longitude: number) => {
+  const hasFix = !!position;
+
+  const loadNearbyStops = useCallback(async (latitude: number, longitude: number) => {
     try {
       setStops(await getNearbyStops(latitude, longitude, 3000));
       setStopsError(false);
     } catch {
       setStopsError(true);
     }
-  };
-
-  const locateMe = async () => {
-    setLoadingLocation(true);
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== 'granted') {
-        setLocationDenied(true);
-        await loadNearbyStops(DAKAR_REGION.latitude, DAKAR_REGION.longitude);
-        return;
-      }
-      setLocationDenied(false);
-      // Sur iOS, l'utilisateur peut n'autoriser qu'une position approximative
-      // (~ plusieurs km) — c'est la cause la plus fréquente d'un point mal placé.
-      setReducedAccuracy(permission.ios?.accuracy === 'reduced');
-
-      const position = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.BestForNavigation,
-      });
-      const next: Region = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        latitudeDelta: 0.015,
-        longitudeDelta: 0.015,
-      };
-      setRegion(next);
-      setHasFix(true);
-      if (!activeTrip) mapRef.current?.animateToRegion(next, 600);
-      await loadNearbyStops(next.latitude, next.longitude);
-    } catch {
-      setStopsError(true);
-    } finally {
-      setLoadingLocation(false);
-    }
-  };
-
-  useEffect(() => {
-    locateMe();
-
-    // Suivi continu : le point bleu et les arrêts proches restent justes
-    // pendant que l'utilisateur se déplace.
-    let subscription: Location.LocationSubscription | undefined;
-    Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 15 },
-      (position) => {
-        setHasFix(true);
-        setRegion((prev) => ({
-          ...prev,
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }));
-      }
-    ).then((sub) => {
-      subscription = sub;
-    });
-
-    return () => subscription?.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Recharge les arrêts autour quand on s'est notablement déplacé.
-  const lastLoadRef = useRef<{ lat: number; lng: number } | null>(null);
+  // La carte est l'endroit où la demande d'autorisation a du sens : on la
+  // déclenche une seule fois, à la première ouverture.
+  const askedRef = useRef(false);
   useEffect(() => {
-    if (!hasFix || activeTrip) return;
+    if (status === 'needs-permission' && !askedRef.current) {
+      askedRef.current = true;
+      request();
+    }
+  }, [status, request]);
+
+  // Sans position, on montre malgré tout le réseau du centre de Dakar.
+  useEffect(() => {
+    if ((status === 'denied' || status === 'services-off') && stops.length === 0) {
+      loadNearbyStops(DAKAR_REGION.latitude, DAKAR_REGION.longitude);
+    }
+  }, [status, stops.length, loadNearbyStops]);
+
+  // Première position reçue : on centre la carte sur l'utilisateur.
+  const centeredRef = useRef(false);
+  useEffect(() => {
+    if (!position || centeredRef.current || activeTrip) return;
+    centeredRef.current = true;
+    mapRef.current?.animateToRegion(
+      {
+        latitude: position.latitude,
+        longitude: position.longitude,
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+      },
+      600
+    );
+  }, [position, activeTrip]);
+
+  // Arrêts proches : rechargés dès qu'on s'est déplacé de plus de 400 m.
+  const lastLoadRef = useRef<LatLng | null>(null);
+  useEffect(() => {
+    if (!position || activeTrip) return;
     const last = lastLoadRef.current;
     const movedKm = last
-      ? distanceKm(last.lat, last.lng, region.latitude, region.longitude)
+      ? distanceKm(last.latitude, last.longitude, position.latitude, position.longitude)
       : Infinity;
     if (movedKm > 0.4) {
-      lastLoadRef.current = { lat: region.latitude, lng: region.longitude };
-      loadNearbyStops(region.latitude, region.longitude);
+      lastLoadRef.current = { latitude: position.latitude, longitude: position.longitude };
+      loadNearbyStops(position.latitude, position.longitude);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [region.latitude, region.longitude, hasFix, activeTrip]);
+  }, [position, activeTrip, loadNearbyStops]);
+
+  // Pendant le guidage, l'écran ne doit pas se verrouiller : une fois éteint,
+  // l'app est suspendue et le guide cesserait de suivre l'utilisateur.
+  useEffect(() => {
+    if (!activeTrip) return;
+    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    return () => {
+      deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+    };
+  }, [activeTrip]);
 
   // Départ d'un trajet : on montre l'itinéraire en entier une fois, puis la
   // caméra se met à suivre l'utilisateur.
   useEffect(() => {
+    stepIndexRef.current = 0;
     if (!activeTrip) {
       setNav(null);
       setFollowing(false);
-      stepIndexRef.current = 0;
       return;
     }
-    stepIndexRef.current = 0;
     const coords = activeTrip.plan.segments.flatMap((s) => s.path);
     if (coords.length > 0) {
       mapRef.current?.fitToCoordinates(coords, {
@@ -175,47 +180,54 @@ export default function HomeScreen() {
   }, [activeTrip]);
 
   // Le cœur du guidage : à chaque position, on recalcule l'étape en cours,
-  // la distance jusqu'à la prochaine action et le temps restant.
+  // la distance jusqu'à la prochaine action et le temps restant, en tenant
+  // compte de la précision réelle du GPS.
   useEffect(() => {
-    if (!activeTrip) return;
+    if (!activeTrip || !position) return;
     const next = computeNavigation(
       activeTrip.plan,
-      { latitude: region.latitude, longitude: region.longitude },
+      position,
       activeTrip.destination.name,
-      stepIndexRef.current
+      stepIndexRef.current,
+      position.accuracy
     );
     stepIndexRef.current = next.stepIndex;
     setNav(next);
-  }, [region, activeTrip]);
+  }, [position, activeTrip]);
 
-  // Caméra qui suit, comme un GPS : recentrée à chaque nouvelle position tant
-  // que l'utilisateur n'a pas déplacé la carte lui-même.
+  // Caméra qui suit, comme un GPS, tant que l'utilisateur n'a pas déplacé la
+  // carte lui-même.
   useEffect(() => {
-    if (!activeTrip || !following || !hasFix) return;
+    if (!activeTrip || !following || !position) return;
     mapRef.current?.animateCamera(
-      { center: { latitude: region.latitude, longitude: region.longitude }, zoom: NAVIGATION_ZOOM },
+      {
+        center: { latitude: position.latitude, longitude: position.longitude },
+        zoom: NAVIGATION_ZOOM,
+      },
       { duration: 700 }
     );
-  }, [region.latitude, region.longitude, following, activeTrip, hasFix]);
+  }, [position, following, activeTrip]);
 
   const recenter = () => {
-    if (activeTrip) {
-      setFollowing(true);
-      mapRef.current?.animateCamera(
-        {
-          center: { latitude: region.latitude, longitude: region.longitude },
-          zoom: NAVIGATION_ZOOM,
-        },
-        { duration: 500 }
-      );
+    if (!position) {
+      request();
       return;
     }
-    locateMe();
+    if (activeTrip) setFollowing(true);
+    mapRef.current?.animateCamera(
+      {
+        center: { latitude: position.latitude, longitude: position.longitude },
+        zoom: activeTrip ? NAVIGATION_ZOOM : BROWSING_ZOOM,
+      },
+      { duration: 500 }
+    );
   };
 
   const firstName = user?.fullName?.trim().split(/\s+/)[0];
   const arrived = nav?.arrived ?? false;
   const sheetBottom = insets.bottom + TAB_BAR_HEIGHT + TAB_BAR_BOTTOM_MARGIN + Spacing.sm;
+  const blocker = LOCATION_BLOCKERS[status];
+  const searching = !position && (status === 'checking' || status === 'locating');
 
   return (
     <View style={styles.container}>
@@ -278,7 +290,7 @@ export default function HomeScreen() {
         )}
       </MapView>
 
-      {loadingLocation && (
+      {searching && (
         <View style={styles.loadingOverlay} pointerEvents="none">
           <View style={styles.loadingPill}>
             <ActivityIndicator color={c.yonn} size="small" />
@@ -288,10 +300,17 @@ export default function HomeScreen() {
       )}
 
       <View style={[styles.topBar, { paddingTop: insets.top + Spacing.sm }]} pointerEvents="box-none">
-        {activeTrip && nav ? (
+        {activeTrip ? (
           <View style={styles.navHeader}>
             <View style={{ flex: 1 }}>
-              <NavigationBanner nav={nav} />
+              {nav ? (
+                <NavigationBanner nav={nav} />
+              ) : (
+                <View style={styles.waitingBanner}>
+                  <ActivityIndicator color={c.yonn} size="small" />
+                  <Text style={styles.waitingText}>En attente du signal GPS pour te guider…</Text>
+                </View>
+              )}
             </View>
             <TouchableOpacity
               style={styles.navClose}
@@ -302,7 +321,7 @@ export default function HomeScreen() {
               <Ionicons name="close" size={18} color={c.ink} />
             </TouchableOpacity>
           </View>
-        ) : activeTrip ? null : (
+        ) : (
           <View style={styles.greeting}>
             <View style={styles.greetingAvatar}>
               <Text style={styles.greetingInitials}>{user ? initialsOf(user.fullName) : ''}</Text>
@@ -311,21 +330,30 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {locationDenied && (
-          <Notice
-            styles={styles}
-            colors={c}
-            icon="information-circle-outline"
-            text="Active ta position dans Réglages pour voir les arrêts autour de toi."
-            onPress={() => Linking.openSettings()}
-          />
+        {blocker && (
+          <View style={styles.blocker}>
+            <View style={styles.blockerIcon}>
+              <Ionicons name={blocker.icon} size={20} color={c.yonnDark} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.blockerText}>{blocker.text}</Text>
+              <TouchableOpacity
+                style={styles.blockerButton}
+                onPress={request}
+                accessibilityRole="button"
+              >
+                <Text style={styles.blockerButtonText}>{blocker.action}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
-        {reducedAccuracy && (
+
+        {hasFix && !precise && (
           <Notice
             styles={styles}
             colors={c}
             icon="locate-outline"
-            text="Position approximative — active la position précise pour un itinéraire exact."
+            text="Position approximative : active « Position exacte » dans les Réglages pour un guidage fiable."
             onPress={() => Linking.openSettings()}
           />
         )}
@@ -546,6 +574,47 @@ const createStyles = (c: Palette, isDark: boolean) => {
       paddingVertical: Spacing.sm,
     },
     noticeText: { flex: 1, fontFamily: Fonts.bodyMedium, fontSize: 12, color: c.yonnDeep },
+
+    // Carte affichée quand la position est indisponible, avec l'action qui
+    // débloque la situation (autoriser, ou ouvrir les Réglages).
+    blocker: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: Spacing.md,
+      backgroundColor: c.surface,
+      borderRadius: Radii.lg,
+      padding: Spacing.md,
+      ...e.floating,
+    },
+    blockerIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: Radii.md,
+      backgroundColor: c.yonnTint,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    blockerText: { fontFamily: Fonts.bodyMedium, fontSize: 14, color: c.ink, lineHeight: 20 },
+    blockerButton: {
+      alignSelf: 'flex-start',
+      backgroundColor: c.yonn,
+      borderRadius: Radii.sm,
+      paddingHorizontal: Spacing.md,
+      paddingVertical: Spacing.sm,
+      marginTop: Spacing.sm,
+    },
+    blockerButtonText: { fontFamily: Fonts.bodySemi, fontSize: 13, color: c.canvas },
+
+    waitingBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: Spacing.sm,
+      backgroundColor: c.surface,
+      borderRadius: Radii.lg,
+      padding: Spacing.md,
+      ...e.floating,
+    },
+    waitingText: { flex: 1, fontFamily: Fonts.bodyMedium, fontSize: 14, color: c.inkMuted },
 
     pin: {
       width: 28,

@@ -11,6 +11,7 @@ import React, { useEffect } from 'react';
 import { AuthProvider } from '../store/AuthContext';
 import { TripProvider } from '../store/TripContext';
 import { ThemeProvider, useTheme } from '../store/ThemeContext';
+import { LocationProvider } from '../store/LocationContext';
 
 // Garde le splash screen affiché tant que les polices ne sont pas prêtes.
 SplashScreen.preventAutoHideAsync();
@@ -35,9 +36,11 @@ export default function RootLayout() {
       <ThemeProvider>
         <AuthProvider>
           <TripProvider>
-            <SafeAreaProvider>
-              <RootNavigator />
-            </SafeAreaProvider>
+            <LocationProvider>
+              <SafeAreaProvider>
+                <RootNavigator />
+              </SafeAreaProvider>
+            </LocationProvider>
           </TripProvider>
         </AuthProvider>
       </ThemeProvider>

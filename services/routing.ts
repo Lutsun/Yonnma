@@ -24,6 +24,10 @@ const WALK_TRANSFER_RADIUS_KM = 0.35;
 // lui afficher une étape "marcher 20 m".
 const MIN_ACCESS_WALK_KM = 0.06;
 
+// Identifiant du « point de départ » quand le trajet commence à la position
+// GPS de l'utilisateur plutôt qu'à un arrêt.
+export const USER_POSITION_ID = 'user-position';
+
 type GraphStop = { id: string; name: string; latitude: number; longitude: number };
 
 type RideEdge = {
@@ -289,7 +293,7 @@ export function withAccessWalk(plan: TripPlan, from: LatLng, boardingStop: Stop)
   const minutes = Math.max(1, Math.round((km / WALK_SPEED_KMH) * 60));
   const walk: TripSegment = {
     type: 'walk',
-    fromStopId: 'user-position',
+    fromStopId: USER_POSITION_ID,
     fromStopName: 'Ma position',
     toStopId: boardingStop.id,
     toStopName: boardingStop.name,
@@ -306,6 +310,61 @@ export function withAccessWalk(plan: TripPlan, from: LatLng, boardingStop: Stop)
     totalWalkMinutes: plan.totalWalkMinutes + minutes,
     segments: [walk, ...plan.segments],
   };
+}
+
+// Nombre d'arrêts de départ comparés quand on part de la position réelle.
+const MAX_ORIGIN_CANDIDATES = 5;
+
+function rideSignature(plan: TripPlan): string {
+  return plan.segments
+    .filter((s): s is Extract<TripSegment, { type: 'ride' }> => s.type === 'ride')
+    .map((s) => s.lineId)
+    .join('>');
+}
+
+/**
+ * Planifie un trajet qui part de la position GPS de l'utilisateur.
+ *
+ * L'arrêt le plus proche à vol d'oiseau n'est pas forcément le bon : il peut
+ * n'être desservi par aucune ligne utile, alors qu'un arrêt 300 m plus loin
+ * mène directement à destination. On compare donc plusieurs arrêts
+ * accessibles à pied — marche comprise — et on garde les meilleurs trajets,
+ * comme le font les applications de navigation.
+ *
+ * `candidates` doit être trié par distance croissante (c'est l'ordre renvoyé
+ * par `nearby_stops`).
+ */
+export function planFromPosition(
+  graph: RouteGraph,
+  from: LatLng,
+  candidates: Stop[],
+  destinationStopId: string
+): TripOption[] {
+  const all: TripPlan[] = [];
+
+  for (const stop of candidates.slice(0, MAX_ORIGIN_CANDIDATES)) {
+    if (stop.id === destinationStopId) continue;
+    for (const option of planTripOptions(graph, stop.id, destinationStopId)) {
+      if (option.plan.segments.length === 0) continue;
+      all.push(withAccessWalk(option.plan, from, stop));
+    }
+  }
+
+  all.sort((a, b) => a.totalMinutes - b.totalMinutes);
+
+  // Deux trajets qui prennent exactement les mêmes lignes ne sont pas un vrai
+  // choix : on ne garde que le plus rapide de chaque combinaison.
+  const seen = new Set<string>();
+  const unique: TripPlan[] = [];
+  for (const plan of all) {
+    const key = rideSignature(plan);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(plan);
+    if (unique.length === 2) break;
+  }
+
+  return unique.map((plan, i) => ({ plan, recommended: i === 0 }));
 }
 
 // Calcule jusqu'à deux options de trajet, pour l'écran "Choisir un trajet" :

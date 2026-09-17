@@ -9,15 +9,24 @@
 import { LatLng, TripPlan, TripSegment } from '../types/transit';
 import { distanceKm } from '../utils/eta';
 
-// Une étape est considérée franchie à moins de 45 m de son point d'arrivée :
-// assez large pour absorber l'imprécision du GPS en ville, assez serré pour
-// ne pas sauter une étape trop tôt.
-const STEP_REACHED_M = 45;
+// Une étape est considérée franchie près de son point d'arrivée. Le rayon
+// suit la précision annoncée par le téléphone : fixe à 45 m, il échouait en
+// ville dense, où le GPS dérive souvent de 50 à 80 m entre les immeubles.
+const STEP_REACHED_MIN_M = 45;
+const STEP_REACHED_MAX_M = 100;
 // Arrivée finale — un peu plus large, on veut annoncer l'arrivée avant que
 // l'utilisateur soit littéralement sur le panneau.
-const DESTINATION_REACHED_M = 70;
+const DESTINATION_REACHED_MIN_M = 70;
 // Au-delà, on considère que l'utilisateur n'est plus sur l'itinéraire.
 const OFF_ROUTE_M = 300;
+// Un fix moins précis que ça ne permet pas de décider quoi que ce soit : on
+// garde l'étape en cours plutôt que d'avancer sur une position douteuse.
+const UNRELIABLE_ACCURACY_M = 150;
+// Rattrapage : si l'utilisateur est nettement plus près d'une étape suivante
+// que de l'étape en cours, c'est qu'un fix a manqué le point de passage
+// (fréquent en bus, qui franchit 50 m entre deux positions).
+const LOOKAHEAD_NEAR_M = 40;
+const LOOKAHEAD_MARGIN_M = 25;
 
 const WALK_SPEED_KMH = 4.5;
 
@@ -35,6 +44,8 @@ export type NavigationState = {
   stepIndex: number;
   arrived: boolean;
   offRoute: boolean;
+  /** Vrai quand le GPS est trop imprécis pour faire avancer le guidage. */
+  weakSignal: boolean;
   /** Distance jusqu'au point d'arrivée de l'étape en cours. */
   distanceToNextM: number;
   remainingMinutes: number;
@@ -123,67 +134,79 @@ export function formatMeters(m: number): string {
   return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
 }
 
+function arrivedState(stepIndex: number, destinationName: string): NavigationState {
+  return {
+    stepIndex,
+    arrived: true,
+    offRoute: false,
+    weakSignal: false,
+    distanceToNextM: 0,
+    remainingMinutes: 0,
+    remainingMeters: 0,
+    progress: 1,
+    instruction: instructionFor(undefined, destinationName, 0),
+  };
+}
+
 /**
  * Recalcule l'état du guidage pour une position donnée.
  *
  * `previousStepIndex` rend l'avancement monotone : une fois une étape
  * franchie on ne revient pas en arrière, même si le GPS fait un écart ou si
  * l'itinéraire repasse près d'un point déjà parcouru.
+ *
+ * `accuracyM` est le rayon d'incertitude annoncé par le téléphone pour cette
+ * position : il élargit les seuils quand le signal est médiocre, et bloque
+ * l'avancement quand il est trop mauvais pour être fiable.
  */
 export function computeNavigation(
   plan: TripPlan,
   user: LatLng,
   destinationName: string,
-  previousStepIndex: number
+  previousStepIndex: number,
+  accuracyM: number | null = null
 ): NavigationState {
   const segments = plan.segments;
+  if (segments.length === 0) return arrivedState(0, destinationName);
+
+  const accuracy = accuracyM ?? STEP_REACHED_MIN_M;
+  const weakSignal = accuracy > UNRELIABLE_ACCURACY_M;
+  const stepRadius = Math.min(STEP_REACHED_MAX_M, Math.max(STEP_REACHED_MIN_M, accuracy));
+  const destinationRadius = Math.max(DESTINATION_REACHED_MIN_M, stepRadius);
+
   const totalMeters = segments.reduce((sum, s) => sum + pathLengthM(s.path), 0);
-
-  if (segments.length === 0) {
-    return {
-      stepIndex: 0,
-      arrived: true,
-      offRoute: false,
-      distanceToNextM: 0,
-      remainingMinutes: 0,
-      remainingMeters: 0,
-      progress: 1,
-      instruction: instructionFor(undefined, destinationName, 0),
-    };
-  }
-
   const destination = endOf(segments[segments.length - 1]);
-  const toDestinationM = metersBetween(user, destination);
-  if (toDestinationM <= DESTINATION_REACHED_M) {
-    return {
-      stepIndex: segments.length,
-      arrived: true,
-      offRoute: false,
-      distanceToNextM: 0,
-      remainingMinutes: 0,
-      remainingMeters: 0,
-      progress: 1,
-      instruction: instructionFor(undefined, destinationName, 0),
-    };
+
+  // Arrivée — on ne la déclare jamais sur une position douteuse.
+  if (!weakSignal && metersBetween(user, destination) <= destinationRadius) {
+    return arrivedState(segments.length, destinationName);
   }
 
-  // Avance tant que le point d'arrivée de l'étape courante est atteint.
-  let index = Math.max(0, previousStepIndex);
-  while (index < segments.length && metersBetween(user, endOf(segments[index])) <= STEP_REACHED_M) {
-    index += 1;
+  let index = Math.min(Math.max(0, previousStepIndex), segments.length - 1);
+
+  if (!weakSignal) {
+    // 1. Avance tant que le point d'arrivée de l'étape courante est atteint.
+    while (index < segments.length && metersBetween(user, endOf(segments[index])) <= stepRadius) {
+      index += 1;
+    }
+
+    // 2. Rattrapage d'un point de passage manqué entre deux positions. On
+    //    retient l'étape suivante la PLUS PROCHE qui convient : sur un trajet
+    //    qui repasse près de son départ, prendre la plus lointaine ferait
+    //    sauter toute la fin d'un coup.
+    if (index < segments.length) {
+      const toCurrent = distanceToPathM(user, segments[index].path);
+      for (let j = index + 1; j < segments.length; j++) {
+        const toLater = distanceToPathM(user, segments[j].path);
+        if (toLater <= LOOKAHEAD_NEAR_M && toLater + LOOKAHEAD_MARGIN_M < toCurrent) {
+          index = j;
+          break;
+        }
+      }
+    }
   }
-  if (index >= segments.length) {
-    return {
-      stepIndex: segments.length,
-      arrived: true,
-      offRoute: false,
-      distanceToNextM: 0,
-      remainingMinutes: 0,
-      remainingMeters: 0,
-      progress: 1,
-      instruction: instructionFor(undefined, destinationName, 0),
-    };
-  }
+
+  if (index >= segments.length) return arrivedState(segments.length, destinationName);
 
   const current = segments[index];
   const distanceToNextM = metersBetween(user, endOf(current));
@@ -191,26 +214,33 @@ export function computeNavigation(
   // Restant : ce qu'il reste de l'étape en cours, plus les étapes suivantes.
   const currentLength = pathLengthM(current.path);
   const currentRemaining = Math.min(distanceToNextM, currentLength);
-  const laterMeters = segments.slice(index + 1).reduce((sum, s) => sum + pathLengthM(s.path), 0);
-  const remainingMeters = currentRemaining + laterMeters;
+  const later = segments.slice(index + 1);
+  const remainingMeters = currentRemaining + later.reduce((sum, s) => sum + pathLengthM(s.path), 0);
 
   const currentFraction = currentLength > 0 ? currentRemaining / currentLength : 0;
-  const laterMinutes = segments.slice(index + 1).reduce((sum, s) => sum + s.minutes, 0);
   const remainingMinutes = Math.max(
     1,
-    Math.round(current.minutes * currentFraction + laterMinutes)
+    Math.round(current.minutes * currentFraction + later.reduce((sum, s) => sum + s.minutes, 0))
   );
 
-  const offRoute = distanceToPathM(user, current.path) > OFF_ROUTE_M;
+  // Hors itinéraire : loin de l'étape en cours ET de la suivante — sans ça,
+  // chaque passage d'une étape à l'autre déclenchait une fausse alerte.
+  const next = segments[index + 1];
+  const toRoute = Math.min(
+    distanceToPathM(user, current.path),
+    next ? distanceToPathM(user, next.path) : Infinity
+  );
+  const offRoute = !weakSignal && toRoute > OFF_ROUTE_M + accuracy;
 
   return {
     stepIndex: index,
     arrived: false,
     offRoute,
+    weakSignal,
     distanceToNextM,
     remainingMinutes,
     remainingMeters,
-    progress: totalMeters > 0 ? Math.min(1, 1 - remainingMeters / totalMeters) : 0,
+    progress: totalMeters > 0 ? Math.max(0, Math.min(1, 1 - remainingMeters / totalMeters)) : 0,
     instruction: instructionFor(current, destinationName, distanceToNextM),
   };
 }

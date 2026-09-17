@@ -18,6 +18,7 @@ import TripSteps from '../../components/trip/TripSteps';
 import { Fonts, Radii, Spacing, Palette } from '../../constants/theme';
 import { useColors } from '../../store/ThemeContext';
 import { saveTrip } from '../../services/trips';
+import { USER_POSITION_ID } from '../../services/routing';
 import { useAuth } from '../../store/AuthContext';
 import { useTrip } from '../../store/TripContext';
 
@@ -47,13 +48,25 @@ export default function TripDetailScreen() {
 
   const handleSave = async () => {
     if (!user || saved) return;
+    // « Ma position » n'a de sens qu'au moment présent : on enregistre à la
+    // place l'arrêt où l'on monte, pour pouvoir relancer ce trajet plus tard
+    // depuis les Favoris.
+    const firstRide = plan.segments.find((s) => s.type === 'ride');
+    const savedOrigin =
+      origin.id === USER_POSITION_ID && firstRide?.type === 'ride'
+        ? {
+            name: firstRide.boardStopName,
+            latitude: firstRide.path[0].latitude,
+            longitude: firstRide.path[0].longitude,
+          }
+        : origin;
     setSaving(true);
     try {
       await saveTrip({
         userId: user.id,
-        originLabel: origin.name,
-        originLatitude: origin.latitude,
-        originLongitude: origin.longitude,
+        originLabel: savedOrigin.name,
+        originLatitude: savedOrigin.latitude,
+        originLongitude: savedOrigin.longitude,
         destinationLabel: destination.name,
         destinationLatitude: destination.latitude,
         destinationLongitude: destination.longitude,
