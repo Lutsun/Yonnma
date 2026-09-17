@@ -44,6 +44,8 @@ supabase/
   seed.sql                 Données réelles de démarrage (lignes et arrêts de Dakar)
   migrate_to_auth.sql      Migration ponctuelle (ancienne table `users` faite main -> Supabase Auth)
   seed_osm.sql             Tracés relevés sur le terrain (OpenStreetMap, ODbL)
+  admin.sql               Droits d'administration pour la console web (admin/)
+admin/                  Console web d'administration (React + Vite) — voir admin/README.md
 ```
 
 ## Base de données
@@ -68,6 +70,10 @@ Dans les deux cas, les **opérateurs, numéros de ligne, terminus et tarifs sont
 `seed_osm.sql` fait autorité sur les lignes qu'il couvre et remplace leur tracé approximatif. Ses données sont sous licence **ODbL** : leur réutilisation impose de citer « © les contributeurs OpenStreetMap ».
 
 Pour aller plus loin, la piste la plus solide serait un export GTFS du CETUD (l'autorité organisatrice des transports de Dakar), qui fournirait les tracés et les horaires officiels.
+
+## Console d'administration
+
+Le réseau (opérateurs, lignes, tracés, arrêts) peut aussi se gérer depuis une interface web, dans [`admin/`](admin/) — une application React séparée qui partage la même base Supabase que l'app mobile, en écriture cette fois. Voir [`admin/README.md`](admin/README.md) pour la mise en route et [`supabase/admin.sql`](supabase/admin.sql) pour donner accès à un compte administrateur.
 
 ## Démarrage
 
