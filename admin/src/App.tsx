@@ -7,6 +7,7 @@ import OperatorsPage from './pages/OperatorsPage';
 import LinesPage from './pages/LinesPage';
 import LineDetailPage from './pages/LineDetailPage';
 import StopsPage from './pages/StopsPage';
+import UsersPage from './pages/UsersPage';
 
 function Gate() {
   const { access } = useAuth();
@@ -26,6 +27,7 @@ function Gate() {
         <Route path="lignes" element={<LinesPage />} />
         <Route path="lignes/:lineId" element={<LineDetailPage />} />
         <Route path="arrets" element={<StopsPage />} />
+        <Route path="utilisateurs" element={<UsersPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

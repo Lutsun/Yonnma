@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { Plus, Pencil, Trash2, Bus, AlertCircle } from 'lucide-react';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
+import EmptyState from '../components/EmptyState';
 import { deleteOperator, listOperators, saveOperator } from '../lib/api';
 import type { Operator } from '../lib/types';
 
@@ -53,22 +56,32 @@ export default function OperatorsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Opérateurs</h1>
-          <p className="page-subtitle">Les réseaux de transport (BRT, Dakar Dem Dikk, Tata AFTU…).</p>
-        </div>
-        <button className="btn btn-primary" onClick={() => setForm(EMPTY)}>
-          + Ajouter un opérateur
-        </button>
-      </div>
+      <PageHeader
+        title="Opérateurs"
+        subtitle="Les réseaux de transport (BRT, Dakar Dem Dikk, Tata AFTU…)."
+        action={
+          <button className="btn btn-primary" onClick={() => setForm(EMPTY)}>
+            <Plus size={16} />
+            Ajouter un opérateur
+          </button>
+        }
+      />
 
-      {error && <div className="notice notice-danger" style={{ marginBottom: 16 }}>{error}</div>}
+      {error && (
+        <div className="notice notice-danger" style={{ marginBottom: 16 }}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="centered-state">Chargement…</div>
       ) : operators.length === 0 ? (
-        <div className="empty-state">Aucun opérateur pour le moment.</div>
+        <EmptyState
+          icon={<Bus size={26} />}
+          title="Aucun opérateur pour le moment"
+          description="Ajoute le premier réseau de transport pour commencer."
+        />
       ) : (
         <div className="table-wrap">
           <table>
@@ -83,7 +96,7 @@ export default function OperatorsPage() {
             <tbody>
               {operators.map((op) => (
                 <tr key={op.id}>
-                  <td>{op.name}</td>
+                  <td style={{ fontWeight: 600 }}>{op.name}</td>
                   <td>{op.short_name}</td>
                   <td>
                     <span className="color-dot" style={{ background: op.color }} />
@@ -92,9 +105,11 @@ export default function OperatorsPage() {
                   <td>
                     <div className="row-actions">
                       <button className="btn" onClick={() => setForm(op)}>
+                        <Pencil size={14} />
                         Modifier
                       </button>
                       <button className="btn btn-danger" onClick={() => handleDelete(op)}>
+                        <Trash2 size={14} />
                         Supprimer
                       </button>
                     </div>
@@ -135,7 +150,12 @@ export default function OperatorsPage() {
                 onChange={(e) => setForm({ ...form, color: e.target.value })}
               />
             </label>
-            {formError && <div className="notice notice-danger">{formError}</div>}
+            {formError && (
+              <div className="notice notice-danger">
+                <AlertCircle size={16} />
+                <span>{formError}</span>
+              </div>
+            )}
             <div className="modal-actions">
               <button type="button" className="btn" onClick={() => setForm(null)}>
                 Annuler

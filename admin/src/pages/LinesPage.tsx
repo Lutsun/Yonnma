@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Plus, Trash2, Search, GitBranch, AlertCircle } from 'lucide-react';
+import PageHeader from '../components/PageHeader';
+import EmptyState from '../components/EmptyState';
 import { countStopsPerLine, deleteLine, listLines, listOperators } from '../lib/api';
 import type { Line, Operator } from '../lib/types';
 
@@ -51,42 +54,62 @@ export default function LinesPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Lignes</h1>
-          <p className="page-subtitle">
-            {lines.length} ligne{lines.length > 1 ? 's' : ''} au total. Ouvre une ligne pour éditer son tracé.
-          </p>
+      <PageHeader
+        title="Lignes"
+        subtitle={`${lines.length} ligne${lines.length > 1 ? 's' : ''} au total. Ouvre une ligne pour éditer son tracé.`}
+        action={
+          <button className="btn btn-primary" onClick={() => navigate('/lignes/nouvelle')}>
+            <Plus size={16} />
+            Ajouter une ligne
+          </button>
+        }
+      />
+
+      {error && (
+        <div className="notice notice-danger" style={{ marginBottom: 16 }}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
         </div>
-        <button className="btn btn-primary" onClick={() => navigate('/lignes/nouvelle')}>
-          + Ajouter une ligne
-        </button>
-      </div>
+      )}
 
-      {error && <div className="notice notice-danger" style={{ marginBottom: 16 }}>{error}</div>}
-
-      <div className="toolbar">
-        <input
-          type="search"
-          placeholder="Chercher un code ou un nom…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <select value={operatorFilter} onChange={(e) => setOperatorFilter(e.target.value)}>
-          <option value="">Tous les opérateurs</option>
-          {operators.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-        <div className="spacer" />
-      </div>
+      {!loading && lines.length > 0 && (
+        <div className="toolbar">
+          <div className="search-input">
+            <Search size={16} />
+            <input
+              type="search"
+              placeholder="Chercher un code ou un nom…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="chip-row">
+            <button className={'chip' + (operatorFilter === '' ? ' active' : '')} onClick={() => setOperatorFilter('')}>
+              Tous
+            </button>
+            {operators.map((o) => (
+              <button
+                key={o.id}
+                className={'chip' + (operatorFilter === o.id ? ' active' : '')}
+                onClick={() => setOperatorFilter(operatorFilter === o.id ? '' : o.id)}
+              >
+                <span className="color-dot" style={{ background: operatorFilter === o.id ? '#fff' : o.color, margin: 0 }} />
+                {o.short_name}
+              </button>
+            ))}
+          </div>
+          <div className="spacer" />
+        </div>
+      )}
 
       {loading ? (
         <div className="centered-state">Chargement…</div>
       ) : filtered.length === 0 ? (
-        <div className="empty-state">Aucune ligne ne correspond.</div>
+        <EmptyState
+          icon={<GitBranch size={26} />}
+          title="Aucune ligne ne correspond"
+          description="Essaie une autre recherche, ou ajoute une nouvelle ligne."
+        />
       ) : (
         <div className="table-wrap">
           <table>
@@ -104,7 +127,7 @@ export default function LinesPage() {
                 const op = operatorById.get(line.operator_id);
                 const count = stopCounts.get(line.id) ?? 0;
                 return (
-                  <tr key={line.id} onClick={() => navigate(`/lignes/${line.id}`)} style={{ cursor: 'pointer' }}>
+                  <tr key={line.id} data-clickable onClick={() => navigate(`/lignes/${line.id}`)}>
                     <td>
                       <span className="badge" style={{ background: line.color || op?.color || '#999' }}>
                         {line.code}
@@ -115,7 +138,7 @@ export default function LinesPage() {
                     <td>{line.fare_fcfa} FCFA</td>
                     <td>
                       {count < 2 ? (
-                        <span style={{ color: 'var(--danger)' }}>{count} (incomplet)</span>
+                        <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{count} (incomplet)</span>
                       ) : (
                         count
                       )}
@@ -123,6 +146,7 @@ export default function LinesPage() {
                     <td>
                       <div className="row-actions">
                         <button className="btn btn-danger" onClick={(e) => handleDelete(line, e)}>
+                          <Trash2 size={14} />
                           Supprimer
                         </button>
                       </div>

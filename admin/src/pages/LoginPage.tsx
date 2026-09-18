@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 
 export default function LoginPage() {
@@ -25,6 +26,7 @@ export default function LoginPage() {
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={handleSubmit}>
+        <div className="auth-logo">Y</div>
         <div className="brand">
           <span className="brand-yonn">Yonn</span>
           <span className="brand-ma">ma</span>
@@ -53,13 +55,19 @@ export default function LoginPage() {
         </label>
 
         {access === 'not-admin' && (
-          <p className="notice notice-danger">
-            Ce compte existe mais n'a pas les droits d'administration.
-          </p>
+          <div className="notice notice-danger">
+            <AlertCircle size={16} />
+            <span>Ce compte existe mais n'a pas les droits d'administration.</span>
+          </div>
         )}
-        {error && <p className="notice notice-danger">{error}</p>}
+        {error && (
+          <div className="notice notice-danger">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+        )}
 
-        <button type="submit" className="btn btn-primary" disabled={loading}>
+        <button type="submit" className="btn btn-primary btn-block" disabled={loading}>
           {loading ? 'Connexion…' : 'Se connecter'}
         </button>
       </form>

@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MapContainer, Marker, Popup, TileLayer, useMapEvents } from 'react-leaflet';
+import { Plus, Search, MapPin, AlertCircle } from 'lucide-react';
 import '../components/LeafletIconFix';
 import Modal from '../components/Modal';
+import PageHeader from '../components/PageHeader';
+import EmptyState from '../components/EmptyState';
 import { deleteStop, listStops, saveStop } from '../lib/api';
 import type { Stop } from '../lib/types';
 
@@ -61,22 +64,26 @@ export default function StopsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Arrêts</h1>
-          <p className="page-subtitle">
-            Clique sur la carte pour ajouter un arrêt à l'endroit exact, ou sur un point existant pour le modifier.
-          </p>
-        </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setForm({ name: '', latitude: DAKAR_CENTER[0], longitude: DAKAR_CENTER[1] })}
-        >
-          + Ajouter un arrêt
-        </button>
-      </div>
+      <PageHeader
+        title="Arrêts"
+        subtitle="Clique sur la carte pour ajouter un arrêt à l'endroit exact, ou sur un point existant pour le modifier."
+        action={
+          <button
+            className="btn btn-primary"
+            onClick={() => setForm({ name: '', latitude: DAKAR_CENTER[0], longitude: DAKAR_CENTER[1] })}
+          >
+            <Plus size={16} />
+            Ajouter un arrêt
+          </button>
+        }
+      />
 
-      {error && <div className="notice notice-danger" style={{ marginBottom: 16 }}>{error}</div>}
+      {error && (
+        <div className="notice notice-danger" style={{ marginBottom: 16 }}>
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
 
       <div className="map-container" style={{ marginBottom: 20 }}>
         <MapContainer center={DAKAR_CENTER} zoom={12} style={{ height: '100%', width: '100%' }}>
@@ -101,23 +108,32 @@ export default function StopsPage() {
         </MapContainer>
       </div>
 
-      <div className="toolbar">
-        <input
-          type="search"
-          placeholder="Chercher un arrêt…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <div className="spacer" />
-        <span className="page-subtitle" style={{ margin: 0 }}>
-          {filtered.length} arrêt{filtered.length > 1 ? 's' : ''}
-        </span>
-      </div>
+      {!loading && stops.length > 0 && (
+        <div className="toolbar">
+          <div className="search-input">
+            <Search size={16} />
+            <input
+              type="search"
+              placeholder="Chercher un arrêt…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="spacer" />
+          <span className="page-subtitle" style={{ margin: 0 }}>
+            {filtered.length} arrêt{filtered.length > 1 ? 's' : ''}
+          </span>
+        </div>
+      )}
 
       {loading ? (
         <div className="centered-state">Chargement…</div>
       ) : filtered.length === 0 ? (
-        <div className="empty-state">Aucun arrêt ne correspond.</div>
+        <EmptyState
+          icon={<MapPin size={26} />}
+          title="Aucun arrêt ne correspond"
+          description="Essaie une autre recherche, ou clique sur la carte pour en ajouter un."
+        />
       ) : (
         <div className="table-wrap">
           <table>
@@ -132,13 +148,13 @@ export default function StopsPage() {
             <tbody>
               {filtered.map((s) => (
                 <tr key={s.id}>
-                  <td>{s.name}</td>
+                  <td style={{ fontWeight: 600 }}>{s.name}</td>
                   <td style={{ color: 'var(--ink-muted)', fontFamily: 'monospace', fontSize: 12 }}>
                     {s.latitude.toFixed(5)}, {s.longitude.toFixed(5)}
                   </td>
                   <td>
                     {s.line_count === 0 ? (
-                      <span style={{ color: 'var(--danger)' }}>0 (orphelin)</span>
+                      <span style={{ color: 'var(--danger)', fontWeight: 600 }}>0 (orphelin)</span>
                     ) : (
                       s.line_count
                     )}
@@ -192,7 +208,12 @@ export default function StopsPage() {
                 />
               </label>
             </div>
-            {formError && <div className="notice notice-danger">{formError}</div>}
+            {formError && (
+              <div className="notice notice-danger">
+                <AlertCircle size={16} />
+                <span>{formError}</span>
+              </div>
+            )}
             <div className="modal-actions">
               <button className="btn" onClick={() => setForm(null)}>
                 Annuler

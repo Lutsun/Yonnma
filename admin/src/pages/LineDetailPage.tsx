@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, ArrowUp, ArrowDown, X, Plus, AlertCircle, CheckCircle2 } from 'lucide-react';
+import PageHeader from '../components/PageHeader';
 import {
   getLine,
   getLineStops,
@@ -103,25 +105,30 @@ export default function LineDetailPage() {
   };
 
   if (loading) return <div className="centered-state">Chargement…</div>;
-  if (error) return <div className="notice notice-danger">{error}</div>;
+  if (error)
+    return (
+      <div className="notice notice-danger">
+        <AlertCircle size={16} />
+        <span>{error}</span>
+      </div>
+    );
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <button className="btn" onClick={() => navigate('/lignes')} style={{ marginBottom: 12 }}>
-            ← Retour aux lignes
+      <PageHeader
+        back={
+          <button className="back-link" onClick={() => navigate('/lignes')}>
+            <ArrowLeft size={14} />
+            Retour aux lignes
           </button>
-          <h1 className="page-title">{isNew ? 'Nouvelle ligne' : `Ligne ${line.code}`}</h1>
-          <p className="page-subtitle">
-            Le tracé (ordre des arrêts) détermine ce que le calcul d'itinéraire de l'app propose.
-          </p>
-        </div>
-      </div>
+        }
+        title={isNew ? 'Nouvelle ligne' : `Ligne ${line.code}`}
+        subtitle="Le tracé (ordre des arrêts) détermine ce que le calcul d'itinéraire de l'app propose."
+      />
 
       <div className="two-col">
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Informations</h3>
+          <h3>Informations</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <label className="field">
               <span>Opérateur</span>
@@ -162,8 +169,18 @@ export default function LineDetailPage() {
               />
             </label>
 
-            {saveError && <div className="notice notice-danger">{saveError}</div>}
-            {saved && !saveError && <div className="notice notice-info">Enregistré.</div>}
+            {saveError && (
+              <div className="notice notice-danger">
+                <AlertCircle size={16} />
+                <span>{saveError}</span>
+              </div>
+            )}
+            {saved && !saveError && (
+              <div className="notice notice-info">
+                <CheckCircle2 size={16} />
+                <span>Enregistré.</span>
+              </div>
+            )}
 
             <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
               {saving ? 'Enregistrement…' : 'Enregistrer'}
@@ -172,12 +189,13 @@ export default function LineDetailPage() {
         </div>
 
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>
+          <h3>
             Tracé — {sequence.length} arrêt{sequence.length > 1 ? 's' : ''}
           </h3>
           {sequence.length < 2 && (
             <div className="notice notice-warning" style={{ marginBottom: 12 }}>
-              Il faut au moins 2 arrêts pour que cette ligne soit utilisable.
+              <AlertCircle size={16} />
+              <span>Il faut au moins 2 arrêts pour que cette ligne soit utilisable.</span>
             </div>
           )}
 
@@ -189,7 +207,7 @@ export default function LineDetailPage() {
                   <span className="name">{s.name}</span>
                   <div className="move-buttons">
                     <button className="btn btn-icon" onClick={() => moveStop(i, -1)} disabled={i === 0} title="Monter">
-                      ↑
+                      <ArrowUp size={14} />
                     </button>
                     <button
                       className="btn btn-icon"
@@ -197,10 +215,10 @@ export default function LineDetailPage() {
                       disabled={i === sequence.length - 1}
                       title="Descendre"
                     >
-                      ↓
+                      <ArrowDown size={14} />
                     </button>
                     <button className="btn btn-icon btn-danger" onClick={() => removeStop(i)} title="Retirer">
-                      ×
+                      <X size={14} />
                     </button>
                   </div>
                 </div>
@@ -218,16 +236,15 @@ export default function LineDetailPage() {
             </label>
             {stopQuery && stopSuggestions.length > 0 && (
               <div className="table-wrap">
-                <table>
-                  <tbody>
-                    {stopSuggestions.map((s) => (
-                      <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => addStop(s)}>
-                        <td>{s.name}</td>
-                        <td style={{ textAlign: 'right', color: 'var(--yonn)' }}>+ Ajouter</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {stopSuggestions.map((s) => (
+                  <div key={s.id} className="stop-suggestion" onClick={() => addStop(s)}>
+                    <span>{s.name}</span>
+                    <span className="stop-suggestion-add">
+                      <Plus size={13} />
+                      Ajouter
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>

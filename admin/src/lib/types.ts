@@ -30,6 +30,16 @@ export type LineStop = {
   sequence: number;
 };
 
+export type YonnmaUser = {
+  id: string;
+  full_name: string;
+  city: string | null;
+  phone: string;
+  created_at: string;
+  saved_trips: number;
+  favorite_lines: number;
+};
+
 export type Stats = {
   operators: number;
   lines: number;
