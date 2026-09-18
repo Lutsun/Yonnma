@@ -11,9 +11,9 @@
 -- l'ordre officiel de la ligne. À corriger dès qu'un relevé GPS réel est
 -- disponible.
 --
--- Cars rapides et Ndiaga Ndiaye n'ont pas de lignes numérotées officielles
--- (réseau informel, sans horaires fixes) : ils sont donc présents comme
--- opérateurs mais sans lignes pour l'instant.
+-- Cars rapides et Ndiaga Ndiaye (réseau informel, sans lignes ni horaires
+-- fixes) ne sont pas des opérateurs gérés ici : le calcul d'itinéraire ne
+-- peut de toute façon rien proposer sans lignes numérotées.
 --
 -- À exécuter après schema.sql, dans l'éditeur SQL Supabase.
 
@@ -21,9 +21,7 @@
 insert into operators (name, short_name, color) values
   ('Sunu BRT', 'BRT', '#00A99D'),
   ('Dakar Dem Dikk', 'DDD', '#1D4ED8'),
-  ('Tata AFTU', 'AFTU', '#F59E0B'),
-  ('Cars rapides', 'Car rapide', '#FBBF24'),
-  ('Ndiaga Ndiaye', 'Ndiaga Ndiaye', '#6B7280')
+  ('Tata AFTU', 'AFTU', '#F59E0B')
 on conflict do nothing;
 
 -- 2. Arrêts ------------------------------------------------------------

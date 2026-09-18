@@ -197,3 +197,42 @@ begin
   );
 end;
 $$;
+
+-- Liste des comptes Yonnma. `security definer` est nécessaire pour lire le
+-- téléphone (dans auth.users, jamais dupliqué dans profiles) et compter les
+-- trajets/favoris de chacun — mais seul un admin peut appeler cette fonction,
+-- et elle ne renvoie rien à un compte qui ne l'est pas.
+create or replace function admin_list_users()
+returns table (
+  id uuid,
+  full_name text,
+  city text,
+  phone text,
+  created_at timestamptz,
+  saved_trips int,
+  favorite_lines int
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not is_admin() then
+    raise exception 'Accès réservé aux administrateurs' using errcode = '42501';
+  end if;
+
+  return query
+  select
+    p.id,
+    p.full_name,
+    p.city,
+    u.phone,
+    p.created_at,
+    (select count(*)::int from user_trips t where t.user_id = p.id and t.is_saved),
+    (select count(*)::int from favorite_lines f where f.user_id = p.id)
+  from profiles p
+  join auth.users u on u.id = p.id
+  order by p.created_at desc;
+end;
+$$;
